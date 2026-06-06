@@ -1,7 +1,6 @@
 <script lang="ts">
   import { invoke, TAURI_ENV, get_static_url } from "../lib/invoker";
   import type { VideoItem } from "../lib/interface";
-  import ImportVideoDialog from "../lib/components/ImportVideoDialog.svelte";
   import { onMount, onDestroy, tick } from "svelte";
   import {
     Play,
@@ -40,7 +39,6 @@
   let selectedVideos: Set<number> = new Set();
   let showDeleteConfirm = false;
   let videoToDelete: VideoItem | null = null;
-  let showImportDialog = false;
 
   // 编辑备注相关状态
   let showEditNoteDialog = false;
@@ -175,11 +173,13 @@
       const roomIdsSet = new Set<string>();
       const tempVideos = await invoke<VideoItem[]>("get_all_videos");
 
-      for (const video of tempVideos) {
+      const clipVideos = tempVideos.filter((video) => video.platform !== "imported");
+
+      for (const video of clipVideos) {
         video.cover = await get_static_url("output", video.cover);
       }
 
-      for (const video of tempVideos) {
+      for (const video of clipVideos) {
         roomIdsSet.add(video.room_id);
         allVideos.push(video);
       }
@@ -388,11 +388,6 @@
     }
   }
 
-  function handleVideoImported() {
-    // 视频导入完成后刷新列表
-    loadVideos();
-  }
-
   function handleImageError(event: Event) {
     // 如果图片加载失败，隐藏图片元素并显示默认图标
     const target = event.target as HTMLImageElement;
@@ -483,13 +478,6 @@
       </div>
 
       <div class="flex items-center space-x-3">
-        <button
-          class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center space-x-2"
-          on:click={() => (showImportDialog = true)}
-        >
-          <Upload class="w-4 h-4 text-white" />
-          <span>导入视频</span>
-        </button>
         <button
           class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
           on:click={loadVideos}
@@ -1177,13 +1165,6 @@
     </div>
   </div>
 {/if}
-
-<!-- 导入视频对话框 -->
-<ImportVideoDialog
-  bind:showDialog={showImportDialog}
-  roomId={selectedRoomId}
-  on:imported={handleVideoImported}
-/>
 
 <style>
   /* macOS style modal */

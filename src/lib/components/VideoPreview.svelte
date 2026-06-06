@@ -1,45 +1,168 @@
 <script lang="ts">
   import {
-    Play,
-    ArrowLeft,
-    Plus,
-    Minus,
-    Pause,
-    Film,
-    Settings,
-    Trash2,
-    BrainCircuit,
-    Eraser,
-    Download,
-    Pen,
-    Scissors,
-  } from "lucide-svelte";
+    DANMAKU_DURATION_SECONDS,
+    DANMAKU_EMOTE_SCALE,
+    DANMAKU_FONT_SIZE_PX,
+    DANMAKU_FONT_FAMILY,
+    DANMAKU_FONT_WEIGHT,
+    DANMAKU_LINE_HEIGHT,
+    DANMAKU_EMOTE_VERTICAL_OFFSET_EM,
+    DANMAKU_TEXT_SHADOW,
+    loadDanmakuStyle,
+    saveDanmakuStyle,
+    getDanmakuEmoteTextGap,
+    loadDanmakuEmoteMap,
+    type DanmakuSegment,
+  } from "../danmaku-emotes";
   import {
     generateEventId,
     parseSubtitleStyle,
-    type ProgressFinished,
-    type ProgressUpdate,
+    type DanmuEntry,
+    type DanmuRenderOptions,
+    type DanmakuEmoteMap,
+    type DanmakuStyle,
     type SubtitleStyle,
     type VideoItem,
+    type VideoPbpData,
     type Profile,
     type Config,
     default_profile,
   } from "../interface";
   import SubtitleStyleEditor from "./SubtitleStyleEditor.svelte";
   import CoverEditor from "./CoverEditor.svelte";
-  import TypeSelect from "./TypeSelect.svelte";
+  import LottieIcon from "./LottieIcon.svelte";
+  import { invoke, TAURI_ENV, listen, log, close_window } from "../invoker";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { onDestroy, onMount, tick } from "svelte";
+  import skipLottieData from "../../assets/lottie/player-three-playrate-hint.json";
+  import muteLottieData from "../../assets/lottie/player-ctrl-muted.json";
+  import volumeLottieData from "../../assets/lottie/player-ctrl-volume.json";
   import {
-    invoke,
-    TAURI_ENV,
-    listen,
-    log,
-    close_window,
-    get_static_url,
-  } from "../invoker";
-  import { onDestroy, onMount } from "svelte";
-  import { listen as tauriListen } from "@tauri-apps/api/event";
-  import type { AccountInfo } from "../db";
-  import WaveSurfer from "wavesurfer.js";
+    DEFAULT_MACOS_NATIVE_PLAYER_WINDOWED_PREVIEW_COMPENSATION,
+    MACOS_NATIVE_PLAYER_POPUP_FALLBACK_ENABLED,
+    MACOS_NATIVE_PLAYER_ID,
+    computeMacOSNativePlayerTargetRect,
+    computeMacOSNativePlayerWindowedYOffset,
+    createMacOSNativeClipPlayerRuntime,
+    detectMacOSNativePlayerSupport,
+    getMacOSNativePlayerViewportSignatureParts,
+    pauseMacOSNativePlayer,
+    seekMacOSNativePlayer,
+    setMacOSNativePlayerRate,
+    shouldHideMacOSNativeDomPreview,
+  } from "./video-preview/macos-native/macosNativeClipPlayer";
+  import {
+    BILIBILI_PBP_METHOD_OPTION,
+    SEEKBAR_PBP_METHOD_OPTIONS,
+    SEEKBAR_PBP_VIEWBOX_HEIGHT,
+    SEEKBAR_PBP_VIEWBOX_WIDTH,
+    buildBilibiliSeekbarPbpCurvePath,
+    buildSeekbarPbpCurvePath,
+    formatTime,
+    formatTimeForSeekInput,
+    formatTimelineMarkerTime,
+    parseTimeInput,
+    resolveSeekbarPbpGlobalMaxDensity,
+    resolveSeekbarPbpSampleCount,
+    resolveTimelineMarkers,
+    type SeekbarPbpGenerationMethod,
+  } from "./video-preview/timeline/timelinePresentation";
+  import {
+    applyClipRegionLabel,
+    canBeClipped as canBeClippedRuntime,
+    clearAllClipSelections as clearAllClipSelectionsRuntime,
+    clearClipSelectionState,
+    createClipSelectionId as createClipSelectionIdRuntime,
+    generateClip as generateClipRuntime,
+    removeWaveformRegion,
+    setActiveClipSelection as setActiveClipSelectionRuntime,
+    setClipEndTime as setClipEndTimeRuntime,
+    setClipStartTime as setClipStartTimeRuntime,
+    syncClipWaveformRegions as syncClipWaveformRegionsRuntime,
+    updateClipSelectionFromRegion as updateClipSelectionFromRegionRuntime,
+    type ClipSelection,
+    type ClipSelectionState,
+  } from "./video-preview/clip/clipSelectionRuntime";
+  import {
+    adjustSubtitleTime as adjustSubtitleTimeRuntime,
+    clearSubtitles as clearSubtitlesRuntime,
+    createSubtitleAtTime,
+    generateSubtitles as generateSubtitlesRuntime,
+    getSubtitleStyle as getSubtitleStyleRuntime,
+    loadSubtitles as loadSubtitlesRuntime,
+    moveSubtitle as moveSubtitleRuntime,
+    removeSubtitle as removeSubtitleRuntime,
+    saveSubtitles as saveSubtitlesRuntime,
+    type SubtitleItem,
+    updateSubtitleTime as updateSubtitleTimeRuntime,
+  } from "./video-preview/subtitle/subtitleRuntime";
+  import { createSubtitleTimelineRuntime } from "./video-preview/subtitle/subtitleTimelineRuntime";
+  import { createSeekbarThumbnailRuntime } from "./video-preview/timeline/seekbarThumbnailRuntime";
+  import {
+    createSeekbarInteractionRuntime,
+    getEventClientPoint,
+  } from "./video-preview/timeline/seekbarInteractionRuntime";
+  import {
+    createPlaybackHotkeyRuntime,
+    isBlockedHotkeyTarget as isBlockedHotkeyTargetRuntime,
+    isTextEntryHotkeyTarget as isTextEntryHotkeyTargetRuntime,
+  } from "./video-preview/playback/playbackHotkeyRuntime";
+  import { createTimelineZoomRuntime } from "./video-preview/timeline/timelineZoomRuntime";
+  import {
+    clearActiveDanmusState,
+    getDanmuMaxActiveDurationMs,
+    loadDanmuRecords,
+    rebuildDanmuPlaybackState,
+    removeActiveDanmuById,
+    resetDanmuPlaybackState,
+    syncDanmuPlaybackState,
+    type ActiveDanmu,
+    type DanmuLayoutConfig,
+    type DanmuPlaybackState,
+  } from "./video-preview/danmu/danmuRuntime";
+  import {
+    createWaveSurferRuntime,
+    destroyWaveSurferRuntime,
+    ensureWaveformData as ensureWaveformDataRuntime,
+    redrawWaveformAtCurrentWidth as redrawWaveformAtCurrentWidthRuntime,
+    syncWaveformWithVideo as syncWaveformWithVideoRuntime,
+    type AudioWaveformData,
+  } from "./video-preview/waveform/waveformRuntime";
+  import {
+    applyTimelinePanelLayoutChange as applyTimelinePanelLayoutChangeRuntime,
+    cancelClipWindowHeightSync as cancelClipWindowHeightSyncRuntime,
+    cancelPreviewLayoutSync as cancelPreviewLayoutSyncRuntime,
+    createClipWindowLayoutState,
+    getAdaptiveClipWindowHeightForState as getAdaptiveClipWindowHeightForStateRuntime,
+    resolvePreviewDisplayMetrics,
+    shouldSuppressClipWindowResizeRefresh as shouldSuppressClipWindowResizeRefreshRuntime,
+    suppressClipWindowResizeRefresh as suppressClipWindowResizeRefreshRuntime,
+    syncClipWindowHeight as syncClipWindowHeightRuntime,
+    syncPreviewLayoutAfterUiChange as syncPreviewLayoutAfterUiChangeRuntime,
+  } from "./video-preview/clip/clipWindowLayoutRuntime";
+  import {
+    createClipWindowLifecycleState,
+    disposeClipWindowLifecycle,
+    setupClipWindowLifecycle,
+  } from "./video-preview/clip/clipWindowLifecycleRuntime";
+  import {
+    createClipWindowPlatformRuntime,
+    createClipWindowPlatformState,
+  } from "./video-preview/clip/clipWindowPlatformRuntime";
+  import VideoPreviewDanmuOverlay from "./video-preview/VideoPreviewDanmuOverlay.svelte";
+  import VideoPreviewEncodeModal from "./video-preview/VideoPreviewEncodeModal.svelte";
+  import VideoPreviewHotkeyOverlay from "./video-preview/VideoPreviewHotkeyOverlay.svelte";
+  import VideoPreviewSidePanel from "./video-preview/VideoPreviewSidePanel.svelte";
+  import VideoPreviewSubtitleOverlay from "./video-preview/VideoPreviewSubtitleOverlay.svelte";
+  import VideoPreviewTopBar from "./video-preview/VideoPreviewTopBar.svelte";
+  import VideoPreviewTransport from "./video-preview/VideoPreviewTransport.svelte";
+  import VideoPreviewLetterboxMask from "./video-preview/VideoPreviewLetterboxMask.svelte";
+  import {
+    captureElementRect,
+    computePlaybackRateButtonLabel,
+    createHoverMenuController,
+    resolveAnchoredMenuMetrics,
+  } from "./video-preview/playback/previewControlsState";
 
   export let show = false;
   export let video: VideoItem;
@@ -49,16 +172,100 @@
     undefined;
   export let onVideoListUpdate: (() => Promise<void>) | undefined = undefined;
 
-  interface Subtitle {
-    startTime: number;
-    endTime: number;
-    text: string;
+  type Subtitle = SubtitleItem;
+
+  const DANMU_LOOKBACK_MS = 1000;
+  const DANMU_ACTIVE_DURATION_MS = DANMAKU_DURATION_SECONDS * 1000;
+  const CLIP_START_MARKER_REGION_ID = "clip-start-marker";
+  const CLIP_SELECTION_REGION_ID_PREFIX = "clip-selection-region-";
+  const CLIP_REGION_COLOR = "rgba(34, 197, 94, 0.3)";
+  const FAST_FORWARD_HOLD_DELAY_MS = 180;
+  const FAST_FORWARD_PLAYBACK_RATE = 3;
+  const PLAYBACK_RATE_OPTIONS = [
+    { value: 0.5, label: "0.5x" },
+    { value: 1, label: "1.0x" },
+    { value: 1.25, label: "1.25x" },
+    { value: 1.5, label: "1.5x" },
+    { value: 2, label: "2.0x" },
+  ] as const;
+  const SEEKBAR_PREVIEW_WIDTH = 160;
+  const SEEKBAR_PREVIEW_HEIGHT = 90;
+  const SEEKBAR_THUMB_SIZE = 22;
+  const SEEKBAR_PULL_INDICATOR_SIZE = 18;
+  const DANMAKU_DISPLAY_AREA_OPTIONS = [10, 25, 50, 75, 100] as const;
+  const DANMAKU_SPEED_PRESET_OPTIONS = [
+    "极慢",
+    "较慢",
+    "适中",
+    "较快",
+    "极快",
+  ] as const;
+  const DANMAKU_MAX_ON_SCREEN_OPTIONS = [-1, 25, 50, 100, 200] as const;
+  const DANMAKU_FONT_OPTIONS = [
+    { label: "黑体", value: DANMAKU_FONT_FAMILY },
+    {
+      label: "微软雅黑",
+      value: '"Microsoft YaHei", "PingFang SC", sans-serif',
+    },
+    { label: "苹方", value: '"PingFang SC", "Hiragino Sans GB", sans-serif' },
+    {
+      label: "冬青黑体",
+      value: '"Hiragino Sans GB", "PingFang SC", sans-serif',
+    },
+    {
+      label: "思源黑体",
+      value: '"Noto Sans CJK SC", "Source Han Sans SC", sans-serif',
+    },
+    { label: "Arial", value: 'Arial, "Helvetica Neue", Helvetica, sans-serif' },
+    {
+      label: "Helvetica",
+      value: '"Helvetica Neue", Helvetica, Arial, "PingFang SC", sans-serif',
+    },
+    { label: "Tahoma", value: 'Tahoma, "Microsoft YaHei", sans-serif' },
+    { label: "Verdana", value: 'Verdana, "Microsoft YaHei", sans-serif' },
+    { label: "宋体", value: 'SimSun, "Songti SC", serif' },
+    { label: "仿宋", value: "FangSong, STFangsong, serif" },
+    { label: "楷体", value: "KaiTi, STKaiti, serif" },
+    {
+      label: "思源宋体",
+      value: '"Noto Serif CJK SC", "Source Han Serif SC", serif',
+    },
+  ] as const;
+  const SEEKBAR_HOVER_HIT_TOP_EXTEND = 6;
+  const SEEKBAR_HOVER_HIT_BOTTOM_EXTEND = 8;
+  const TIMELINE_GESTURE_SCALE_DELTA_PER_STEP = 0.1;
+  const TIMELINE_GESTURE_WHEEL_DELTA_PER_STEP = 50;
+  const TIMELINE_GESTURE_COMMIT_DELAY_MS = 120;
+  const CLIP_WINDOW_BASE_HEIGHT = 736;
+  const CLIP_WINDOW_SUBTITLE_TIMELINE_EXTRA_HEIGHT = 16;
+  const CLIP_WINDOW_WAVEFORM_EXTRA_HEIGHT = 60;
+  const WAVEFORM_PANEL_HEIGHT_PX = 60;
+  const WAVEFORM_BAR_HEIGHT_RATIO = 0.7;
+  const CLIP_WINDOW_HEIGHT_SYNC_THRESHOLD_PX = 1;
+  const CLIP_WINDOW_RESIZE_REFRESH_SUPPRESS_MS = 240;
+  const TIMELINE_AXIS_SIDE_INSET_PX = 12;
+  const TRANSPARENT_SEEKBAR_PREVIEW_IMAGE =
+    "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
+  const seekbarPbpCurveClipPathId = `bpx-player-pbp-curve-path-${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+  const seekbarPbpPlayedClipPathId = `bpx-player-pbp-played-path-${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+
+  function getBrowserWindow() {
+    return typeof window === "undefined" ? null : window;
   }
 
   let subtitles: Subtitle[] = [];
+  let danmuRecords: DanmuEntry[] = [];
+  let activeDanmus: ActiveDanmu[] = [];
   let currentTime = 0;
   let currentSubtitle = "";
   let videoElement: HTMLVideoElement;
+  let macOSNativePlayerSlotElement: HTMLDivElement | null = null;
+  let previewStageElement: HTMLDivElement | null = null;
+  let previewStageHeightLockPx: number | null = null;
   let showDefaultCoverIcon = false;
   let timelineWidth = 0;
 
@@ -70,7 +277,10 @@
   let draggingSubtitle: { index: number; isStart: boolean } | null = null;
   let draggingBlock: number | null = null;
   let timelineScale = 1; // 时间轴缩放比例，1 表示正常大小
+  let timelineSliderValue = 0;
+  let maxTimelineScale = 10;
   let isPlaying = false;
+  let macOSNativePauseRequestPending = false;
   let timeMarkers: number[] = [];
   let dragOffset: number = 0; // 添加拖动偏移量
   let isVideoLoaded = false;
@@ -78,15 +288,248 @@
   let volume = 1;
   let previousVolume = 1;
   let isMuted = false;
+  let playIconSeed = 0;
+  let lastIsPlayingState = false;
+  let volumeIconSeed = 0;
+  let lastVolumeMutedState = false;
+  let isVolumeHover = false;
+  let isVolumeHoverSuppressed = false;
+  let isVolumeClickAnimating = false;
+  let isSettingsHover = false;
+  let isFullscreenHover = false;
+  let isWebFullscreenHover = false;
+  let isWideHover = false;
+  let isTimeSeekEditing = false;
+  let timeSeekValue = "";
+  let timeSeekInput: HTMLInputElement | null = null;
+  let isWebFullscreen = false;
+  let isWindowWide = false;
   let currentSubtitleIndex = -1;
-  let subtitleElements: HTMLElement[] = [];
-  let timelineContainer: HTMLElement;
+  let timelineContainer: HTMLElement | null = null;
+  let timelineZoomControlElement: HTMLElement | null = null;
+  let waveformGestureElement: HTMLElement | null = null;
   let showEncodeModal = false;
+  let showClipGenerateModal = false;
+  let encodeIncludeSubtitle = true;
+  let encodeIncludeDanmu = false;
+  let clipIncludeSubtitle = false;
+  let clipIncludeDanmu = false;
   let videoWidth = 0;
   let videoHeight = 0;
+  let videoDisplayHeight = 0;
+  let previewDisplayHeight = 720;
+  let videoResizeObserver: ResizeObserver | null = null;
+  let macOSNativePlayerAvailable = false;
+  let isMacOSNativePlayerActive = false;
+  let macOSNativePlayerMountFailed = false;
+  let macOSNativePlayerMountPending = false;
+  let forceDomPreviewHidden = false;
+  let previewStageViewportTop = 0;
+  let previewStageViewportLeft = 0;
+  let previewStageViewportWidth = 0;
+  let previewStageViewportHeight = 0;
+  let previewVideoFrameTop = 0;
+  let previewVideoFrameLeft = 0;
+  let previewVideoFrameWidth = 0;
+  let previewVideoFrameHeight = 0;
+  let stablePreviewVideoFrameStyle = "display:none;";
+  let arePreviewDisplayMetricsFrozen = false;
+  let shouldUseMacOSNativePlayerValue = false;
+  let shouldRenderMacOSNativePlayerPresentationValue = false;
+  let shouldPreferMacOSNativePlayerPresentationValue = false;
+  let showMacOSNativePlayerUnderlayValue = false;
+  let suppressPreviewOverlayLayersValue = false;
+  let usingMacOSNativePlayerValue = false;
+  let isPlaybackRateMenuVisible = false;
+  let playbackRateMenuHideTimer: number | null = null;
+  let isPreviewDisplayMenuVisible = false;
+  let previewDisplayMenuHideTimer: number | null = null;
+  let isPreviewDisplayMenuInteractionLocked = false;
+  let hidePreviewDisplayMenuDuringPanelTransition = false;
+  let playbackRateTriggerElement: HTMLButtonElement | null = null;
+  let previewSettingsControlElement: HTMLDivElement | null = null;
+  let previewSettingsButtonElement: HTMLButtonElement | null = null;
+  let previewDisplayMenuElement: HTMLDivElement | null = null;
+  let previewDisplayMenuLockedRect: {
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+  } | null = null;
+  let reserveSubtitleTimelineLayoutDuringResize = false;
+  let reserveWaveformLayoutDuringResize = false;
+  const PREVIEW_DISPLAY_MENU_WIDTH = 156;
+  const PREVIEW_DISPLAY_MENU_HEIGHT = 108;
+  let isPbpMethodMenuVisible = false;
+  let pbpMethodMenuHideTimer: number | null = null;
+  let isVolumeMenuVisible = false;
+  let volumeMenuHideTimer: number | null = null;
+  let isDanmuFontMenuVisible = false;
+  let danmuFontMenuHideTimer: number | null = null;
+  let isVideoSelectMenuVisible = false;
+  let videoSelectMenuHideTimer: number | null = null;
+  let volumeClickAnimationTimer: number | null = null;
+  let showFastForwardOverlayValue = false;
+  let playbackRateDisplayLabelValue = "倍速";
+  let canAdjustPlaybackRateValue = true;
+  let isDocumentFullscreen = false;
+  let suspendMacOSNativePlayerUnderlayForPopupValue = false;
+  let playbackDurationValue = 0;
+  let effectiveVolumePercentValue = 100;
+  let threePlayrateHintTopValue = 18;
+  let macOSNativePlayerWindowedPreviewCompensationValue =
+    DEFAULT_MACOS_NATIVE_PLAYER_WINDOWED_PREVIEW_COMPENSATION;
+  const danmuFontMenuController = createHoverMenuController({
+    getTimer: () => danmuFontMenuHideTimer,
+    setTimer: (value) => {
+      danmuFontMenuHideTimer = value;
+    },
+    setVisible: (value) => {
+      isDanmuFontMenuVisible = value;
+    },
+    canOpen: () => danmuEnabled,
+  });
+  const videoSelectMenuController = createHoverMenuController({
+    getTimer: () => videoSelectMenuHideTimer,
+    setTimer: (value) => {
+      videoSelectMenuHideTimer = value;
+    },
+    setVisible: (value) => {
+      isVideoSelectMenuVisible = value;
+    },
+  });
+  const playbackRateMenuController = createHoverMenuController({
+    getTimer: () => playbackRateMenuHideTimer,
+    setTimer: (value) => {
+      playbackRateMenuHideTimer = value;
+    },
+    setVisible: (value) => {
+      isPlaybackRateMenuVisible = value;
+    },
+    canOpen: () => canAdjustPlaybackRateValue,
+    closeDelayMs: 80,
+  });
+  const previewDisplayMenuController = createHoverMenuController({
+    getTimer: () => previewDisplayMenuHideTimer,
+    setTimer: (value) => {
+      previewDisplayMenuHideTimer = value;
+    },
+    setVisible: (value) => {
+      isPreviewDisplayMenuVisible = value;
+    },
+    canOpen: () => !isPreviewDisplayMenuInteractionLocked,
+  });
+  const pbpMethodMenuController = createHoverMenuController({
+    getTimer: () => pbpMethodMenuHideTimer,
+    setTimer: (value) => {
+      pbpMethodMenuHideTimer = value;
+    },
+    setVisible: (value) => {
+      isPbpMethodMenuVisible = value;
+    },
+  });
+  const volumeMenuController = createHoverMenuController({
+    getTimer: () => volumeMenuHideTimer,
+    setTimer: (value) => {
+      volumeMenuHideTimer = value;
+    },
+    setVisible: (value) => {
+      isVolumeMenuVisible = value;
+    },
+  });
+  const macOSNativeClipPlayerRuntime = createMacOSNativeClipPlayerRuntime({
+    playerId: MACOS_NATIVE_PLAYER_ID,
+    tauriEnv: TAURI_ENV,
+    getVideoSource: () => video?.file,
+    getSlotElement: () => macOSNativePlayerSlotElement,
+    getTargetRect: () => getMacOSNativePlayerTargetRect(),
+    getViewportSignatureParts: () => getMacOSNativePlayerViewportSignatureParts(),
+    getIsDocumentFullscreen: () => isDocumentFullscreen,
+    getShouldUseMacOSNativePlayer: () => shouldUseMacOSNativePlayer(),
+    getUsingMacOSNativePlayer: () => usingMacOSNativePlayer(),
+    getIsMacOSNativePlayerActive: () => isMacOSNativePlayerActive,
+    getMacOSNativePlayerAvailable: () => macOSNativePlayerAvailable,
+    setMacOSNativePlayerMountFailed: (value) => {
+      macOSNativePlayerMountFailed = value;
+    },
+    setIsMacOSNativePlayerActive: (value) => {
+      isMacOSNativePlayerActive = value;
+    },
+    setForceDomPreviewHidden: (value) => {
+      forceDomPreviewHidden = value;
+    },
+    getVolume: () => getEffectiveVolume(),
+    getVideoElement: () => videoElement ?? null,
+    shouldHideDomPreview: () => shouldHideDomPreview(),
+    onPlaybackState: (state) => {
+      const wasPlaying = isPlaying;
+      const timeDelta = Math.abs(state.currentTime - currentTime);
+      let nextPlaying = state.playing;
+      let ignoredStaleNativePlayingState = false;
+      if (macOSNativePauseRequestPending) {
+        if (state.playing) {
+          nextPlaying = false;
+          ignoredStaleNativePlayingState = true;
+        } else {
+          macOSNativePauseRequestPending = false;
+        }
+      }
+      currentPlaybackRate = nextPlaying
+        ? Math.max(0.1, state.rate || getSelectedPlaybackRate())
+        : getSelectedPlaybackRate();
+      isPlaying = nextPlaying;
+      const shouldSyncDanmuOnNativeState =
+        !ignoredStaleNativePlayingState &&
+        (nextPlaying || timeDelta > 0.5);
+      const isNoopPausedNativeState =
+        !wasPlaying &&
+        !nextPlaying &&
+        timeDelta <= 0.001;
+      if (isNoopPausedNativeState) {
+        return;
+      }
+      const isPausedNativeTimeDrift =
+        !nextPlaying && timeDelta <= 0.5;
+      if (isPausedNativeTimeDrift) {
+        return;
+      }
+      applyPlaybackProgress(
+        state.currentTime,
+        !isRightArrowFastForwardActive,
+        shouldSyncDanmuOnNativeState,
+      );
+
+      if (
+        wasPlaying &&
+        !nextPlaying &&
+        state.duration > 0 &&
+        state.currentTime >= Math.max(0, state.duration - 0.05)
+      ) {
+        handleNativePlaybackEnded();
+      }
+    },
+    onPlaybackEnded: () => {
+      handleNativePlaybackEnded();
+    },
+  });
+  const seekbarThumbnailRuntime = createSeekbarThumbnailRuntime({
+    getShouldGenerate: () =>
+      TAURI_ENV && Boolean(config?.use_seekbar_thumbnail_cache),
+    getVideoId: () => {
+      const videoId = Number(video?.id);
+      return Number.isFinite(videoId) && videoId > 0 ? videoId : null;
+    },
+    getDuration: () => getSeekbarDuration(),
+    getShowSeekbarPopup: () => showSeekbarPopupValue,
+    getSeekbarPopupTime: () => seekbarPopupTimeValue,
+    setPreviewImageSrc: (value) => {
+      seekbarPreviewImageSrc = value;
+    },
+  });
   let subtitleStyle: SubtitleStyle = {
     fontName: "Arial",
     fontSize: 18,
+    fontWeight: 700,
     fontColor: "#FFFFFF",
     outlineColor: "#000000",
     outlineWidth: 2,
@@ -98,8 +541,23 @@
 
   let current_encode_event_id = null;
   let current_generate_event_id = null;
-  let windowCloseUnlisten: (() => void) | null = null;
   let activeTab = "subtitle"; // 添加当前激活的 tab
+  let showSubtitleTimeline = false;
+  let showSubtitleTimelineEffective = false;
+  let showSubtitleTimelineLayoutVisible = false;
+  let showWaveform = false;
+  let showWaveformLayoutVisible = false;
+  let showPbpOverlay = true;
+  let seekbarPbpGenerationMethod: SeekbarPbpGenerationMethod = "conv_curve";
+  let bilibiliPbpData: VideoPbpData | null = null;
+  let waveformScale = 1;
+  const timelineZoomSteps = 1000;
+  const TIMELINE_ZOOM_NOTCH_PERCENTS = [
+    0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1,
+  ] as const;
+  const TIMELINE_ZOOM_NOTCH_VALUES = TIMELINE_ZOOM_NOTCH_PERCENTS.map(
+    (percent) => percent * timelineZoomSteps,
+  );
 
   // 切片功能相关变量
   let clipStartTime = 0;
@@ -109,13 +567,66 @@
   let current_clip_event_id = null;
   let show_detail = false; // 控制快捷键说明的展开
   let lastVideoId = -1; // 记录上一个视频ID，避免重复初始化
+  let lastSeekbarThumbnailVideoSource = "";
   let clipTimesSet = false; // 标记用户是否主动设置过切片时间
+  let clipSelections: ClipSelection[] = [];
+  let activeClipSelectionId: string | null = null;
+  let clipExportSelectionIds: string[] = [];
+  let previousClipSelectionIds: string[] = [];
+  let mergeClipSelectionsOnExport = true;
+  let clipSelectionIdCounter = 0;
+  let clipSelectionPersistenceVideoId: number | null = null;
+  let clipSelectionPersistenceReady = false;
+  let hasPendingClipStartMarker = false;
+  let pendingClipStartTime = 0;
+  let clipRegionColor = "";
 
   // 进度条拖动相关变量
   let isDraggingSeekbar = false;
   let seekbarElement: HTMLElement;
+  let seekbarProgressElement: HTMLElement;
   let previewTime = 0; // 拖动时预览的时间
   let wasPlayingBeforeDrag = false; // 拖动前的播放状态
+  let isSeekbarHovering = false;
+  let isSeekbarTrackHovering = false;
+  let seekbarHoverTime = 0;
+  let seekbarPreviewImageSrc = "";
+  let seekbarMetricsWidth = 0;
+  let seekbarViewportLeft = 0;
+  let seekbarViewportTop = 0;
+  let seekbarViewportHeight = 6;
+  let seekbarCurrentRatioValue = 0;
+  let seekbarCurrentXValue = 0;
+  let seekbarPointerRatioValue = 0;
+  let seekbarPointerXValue = 0;
+  let seekbarPopupLeftValue = 0;
+  let seekbarPopupTimeValue = 0;
+  let seekbarPopupViewportLeftValue = 0;
+  let seekbarPopupViewportTopValue = 0;
+  let seekbarPointerClientX: number | null = null;
+  let seekbarPointerClientY: number | null = null;
+  let showSeekbarPopupValue = false;
+  let showSeekbarMoveIndicatorValue = false;
+  let seekbarPbpCurvePath = "";
+  let seekbarPbpPlayedWidth = 0;
+  let seekbarPbpVisible = false;
+  let seekbarPbpCurveCacheKey = "";
+  let seekbarPbpGlobalMaxDensity = 0;
+  let seekbarPbpGlobalMaxDensityCacheKey = "";
+  let seekbarPbpZoomVersion = 0;
+  let seekbarPbpViewBoxX = 0;
+  let seekbarPbpViewBoxWidth = SEEKBAR_PBP_VIEWBOX_WIDTH;
+  let seekbarPbpViewBoxValue = `0 0 ${SEEKBAR_PBP_VIEWBOX_WIDTH} ${SEEKBAR_PBP_VIEWBOX_HEIGHT}`;
+  $: hasBilibiliPbpData =
+    Boolean(bilibiliPbpData?.values?.some((value) => Number(value) > 0)) &&
+    Number(bilibiliPbpData?.stepSec) > 0;
+  $: seekbarPbpMethodOptions = hasBilibiliPbpData
+    ? [BILIBILI_PBP_METHOD_OPTION, ...SEEKBAR_PBP_METHOD_OPTIONS]
+    : SEEKBAR_PBP_METHOD_OPTIONS;
+  $: if (!hasBilibiliPbpData && seekbarPbpGenerationMethod === "bilibili_pbp") {
+    seekbarPbpGenerationMethod = "conv_curve";
+    seekbarPbpZoomVersion += 1;
+  }
 
   // 投稿相关变量
   let current_post_event_id = null;
@@ -126,10 +637,1503 @@
 
   // WaveSurfer.js 相关变量
   let wavesurfer: any = null;
+  let waveformRegions: any = null;
+  let clipStartMarkerRegion: any = null;
+  let clipSelectionRegions: Record<string, any> = {};
   let waveformContainer: HTMLElement;
   let isWaveformLoaded = false;
   let isWaveformLoading = false;
-  let syncTimeout: ReturnType<typeof setTimeout> | null = null;
+  let waveformDataPromise: Promise<AudioWaveformData> | null = null;
+  let waveformDataVideoId: number | null = null;
+  let seekbarHoverSyncFrame: number | null = null;
+  let waveformRenderFrame: number | null = null;
+
+  function getClipSelectionState(): ClipSelectionState {
+    return {
+      clipSelections,
+      activeClipSelectionId,
+      clipStartTime,
+      clipEndTime,
+      clipTimesSet,
+      hasPendingClipStartMarker,
+      pendingClipStartTime,
+      clipRegionColor,
+    };
+  }
+
+  function applyClipSelectionState(state: ClipSelectionState) {
+    clipSelections = state.clipSelections;
+    activeClipSelectionId = state.activeClipSelectionId;
+    clipStartTime = state.clipStartTime;
+    clipEndTime = state.clipEndTime;
+    clipTimesSet = state.clipTimesSet;
+    hasPendingClipStartMarker = state.hasPendingClipStartMarker;
+    pendingClipStartTime = state.pendingClipStartTime;
+    clipRegionColor = state.clipRegionColor;
+  }
+
+  function getClipSelectionStorageKey(videoId: number) {
+    return `clip_selections:${videoId}`;
+  }
+
+  function sanitizePersistedClipSelections(value: unknown): ClipSelection[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+
+    return value
+      .filter((selection): selection is ClipSelection => {
+        if (!selection || typeof selection !== "object") {
+          return false;
+        }
+        const item = selection as ClipSelection;
+        return (
+          typeof item.id === "string" &&
+          Number.isFinite(item.startTime) &&
+          Number.isFinite(item.endTime) &&
+          item.endTime > item.startTime
+        );
+      })
+      .map((selection) => ({
+        id: selection.id,
+        startTime: Math.max(0, selection.startTime),
+        endTime: Math.max(0, selection.endTime),
+        color: selection.color || CLIP_REGION_COLOR,
+      }));
+  }
+
+  function inferClipSelectionCounter(selections: ClipSelection[]) {
+    return selections.reduce((counter, selection) => {
+      const match = selection.id.match(/(\d+)$/);
+      return Math.max(counter, match ? Number(match[1]) : 0);
+    }, 0);
+  }
+
+  function loadPersistedClipSelections(videoId: number) {
+    clipSelectionPersistenceReady = false;
+    clipSelectionPersistenceVideoId = videoId;
+
+    let savedState: any = null;
+    try {
+      const raw = window.localStorage.getItem(getClipSelectionStorageKey(videoId));
+      savedState = raw ? JSON.parse(raw) : null;
+    } catch (error) {
+      log.warn("failed to load clip selections", { videoId, error });
+    }
+
+    const savedSelections = sanitizePersistedClipSelections(
+      savedState?.clipSelections,
+    );
+    const savedSelectionIds = new Set(savedSelections.map((selection) => selection.id));
+    clipSelections = savedSelections;
+    activeClipSelectionId =
+      typeof savedState?.activeClipSelectionId === "string" &&
+      savedSelectionIds.has(savedState.activeClipSelectionId)
+        ? savedState.activeClipSelectionId
+        : (savedSelections[savedSelections.length - 1]?.id ?? null);
+    clipExportSelectionIds = Array.isArray(savedState?.clipExportSelectionIds)
+      ? savedState.clipExportSelectionIds.filter((id: unknown) =>
+          typeof id === "string" && savedSelectionIds.has(id),
+        )
+      : savedSelections.map((selection) => selection.id);
+    previousClipSelectionIds = savedSelections.map((selection) => selection.id);
+    mergeClipSelectionsOnExport =
+      typeof savedState?.mergeClipSelectionsOnExport === "boolean"
+        ? savedState.mergeClipSelectionsOnExport
+        : true;
+    clipSelectionIdCounter = Math.max(
+      Number(savedState?.clipSelectionIdCounter) || 0,
+      inferClipSelectionCounter(savedSelections),
+    );
+    applyClipSelectionState(
+      setActiveClipSelectionRuntime({
+        state: {
+          ...getClipSelectionState(),
+          clipSelections,
+          activeClipSelectionId,
+          hasPendingClipStartMarker: false,
+          pendingClipStartTime: 0,
+        },
+        id: activeClipSelectionId,
+      }),
+    );
+    clipSelectionPersistenceReady = true;
+  }
+
+  function savePersistedClipSelections() {
+    if (
+      typeof window === "undefined" ||
+      !clipSelectionPersistenceReady ||
+      !clipSelectionPersistenceVideoId
+    ) {
+      return;
+    }
+
+    window.localStorage.setItem(
+      getClipSelectionStorageKey(clipSelectionPersistenceVideoId),
+      JSON.stringify({
+        clipSelections,
+        activeClipSelectionId,
+        clipExportSelectionIds,
+        mergeClipSelectionsOnExport,
+        clipSelectionIdCounter,
+      }),
+    );
+  }
+
+  $: {
+    const currentIds = clipSelections.map((selection) => selection.id);
+    const previousIds = new Set(previousClipSelectionIds);
+    const selectedIds = new Set(clipExportSelectionIds);
+    const nextExportSelectionIds = currentIds.filter(
+      (id) => selectedIds.has(id) || !previousIds.has(id),
+    );
+
+    if (
+      nextExportSelectionIds.length !== clipExportSelectionIds.length ||
+      nextExportSelectionIds.some((id, index) => id !== clipExportSelectionIds[index])
+    ) {
+      clipExportSelectionIds = nextExportSelectionIds;
+    }
+
+    previousClipSelectionIds = currentIds;
+  }
+
+  $: {
+    clipSelections;
+    activeClipSelectionId;
+    clipExportSelectionIds;
+    mergeClipSelectionsOnExport;
+    clipSelectionIdCounter;
+    savePersistedClipSelections();
+  }
+
+  const clipWindowLifecycleState = createClipWindowLifecycleState();
+  const clipWindowLayoutState = createClipWindowLayoutState();
+  const clipWindowPlatformState = createClipWindowPlatformState();
+  const subtitleTimelineRuntime = createSubtitleTimelineRuntime({
+    timelineAxisSideInsetPx: TIMELINE_AXIS_SIDE_INSET_PX,
+    getTimelineElement: () => timelineElement,
+    getVideoDuration: () => videoElement?.duration ?? 0,
+    getSubtitles: () => subtitles,
+    getDraggingSubtitle: () => draggingSubtitle,
+    setDraggingSubtitle: (value) => {
+      draggingSubtitle = value;
+    },
+    getDraggingBlock: () => draggingBlock,
+    setDraggingBlock: (value) => {
+      draggingBlock = value;
+    },
+    getDragOffset: () => dragOffset,
+    setDragOffset: (value) => {
+      dragOffset = value;
+    },
+    updateSubtitleTime: (index, isStart, time) => {
+      updateSubtitleTime(index, isStart, time);
+    },
+    moveSubtitle: (index, newStartTime) => {
+      moveSubtitle(index, newStartTime);
+    },
+  });
+  const seekbarInteractionRuntime = createSeekbarInteractionRuntime({
+    hoverHitTopExtend: SEEKBAR_HOVER_HIT_TOP_EXTEND,
+    hoverHitBottomExtend: SEEKBAR_HOVER_HIT_BOTTOM_EXTEND,
+    getSeekbarElement: () => seekbarElement,
+    getSeekbarProgressElement: () => seekbarProgressElement,
+    getTimelineWidth: () => timelineWidth,
+    getWindowObject: getBrowserWindow,
+    getIsDraggingSeekbar: () => isDraggingSeekbar,
+    setIsDraggingSeekbar: (value) => {
+      isDraggingSeekbar = value;
+    },
+    getIsPlaying: () => isPlaying,
+    setIsPlaying: (value) => {
+      isPlaying = value;
+    },
+    getWasPlayingBeforeDrag: () => wasPlayingBeforeDrag,
+    setWasPlayingBeforeDrag: (value) => {
+      wasPlayingBeforeDrag = value;
+    },
+    getPreviewTimeValue: () => previewTime,
+    setPreviewTimeValue: (value) => {
+      previewTime = value;
+    },
+    setIsSeekbarHovering: (value) => {
+      isSeekbarHovering = value;
+    },
+    setIsSeekbarTrackHovering: (value) => {
+      isSeekbarTrackHovering = value;
+    },
+    setSeekbarHoverTime: (value) => {
+      seekbarHoverTime = value;
+    },
+    setSeekbarMetricsWidth: (value) => {
+      seekbarMetricsWidth = value;
+    },
+    setSeekbarViewportLeft: (value) => {
+      seekbarViewportLeft = value;
+    },
+    setSeekbarViewportTop: (value) => {
+      seekbarViewportTop = value;
+    },
+    setSeekbarViewportHeight: (value) => {
+      seekbarViewportHeight = value;
+    },
+    getSeekbarPointerClientX: () => seekbarPointerClientX,
+    getSeekbarPointerClientY: () => seekbarPointerClientY,
+    setSeekbarPointerClientPoint: (clientX, clientY) => {
+      seekbarPointerClientX = clientX;
+      seekbarPointerClientY = clientY;
+    },
+    getSeekbarHoverSyncFrame: () => seekbarHoverSyncFrame,
+    setSeekbarHoverSyncFrame: (value) => {
+      seekbarHoverSyncFrame = value;
+    },
+    getSeekbarDuration,
+    getPlaybackCurrentTime,
+    normalizeSeekbarPreviewTime,
+    resetThumbnails: (resetCache) => {
+      seekbarThumbnailRuntime.reset(resetCache);
+    },
+    pausePlayback: pausePrimaryPlayback,
+    playPlayback: playPrimaryPlayback,
+    commitPreviewTime: (time) => {
+      setPreviewTime(time);
+    },
+    resetFastForward: async (reason) => {
+      await resetRightArrowFastForward(false, reason);
+    },
+  });
+  const timelineZoomRuntime = createTimelineZoomRuntime({
+    gestureScaleDeltaPerStep: TIMELINE_GESTURE_SCALE_DELTA_PER_STEP,
+    gestureWheelDeltaPerStep: TIMELINE_GESTURE_WHEEL_DELTA_PER_STEP,
+    gestureCommitDelayMs: TIMELINE_GESTURE_COMMIT_DELAY_MS,
+    seekbarPbpViewBoxWidth: SEEKBAR_PBP_VIEWBOX_WIDTH,
+    getWindowObject: getBrowserWindow,
+    getTimelineElement: () => timelineElement,
+    getTimelineContainer: () => timelineContainer,
+    getTimelineSliderValue: () => timelineSliderValue,
+    setTimelineSliderValue: (value) => {
+      timelineSliderValue = value;
+    },
+    getTimelineScale: () => timelineScale,
+    setTimelineScale: (value) => {
+      timelineScale = value;
+    },
+    getTimelineWidth: () => timelineWidth,
+    setTimelineWidth: (value) => {
+      timelineWidth = value;
+    },
+    getTimelineZoomSteps: () => timelineZoomSteps,
+    getSeekbarPbpViewBoxX: () => seekbarPbpViewBoxX,
+    setSeekbarPbpViewBoxX: (value) => {
+      seekbarPbpViewBoxX = value;
+    },
+    setSeekbarPbpViewBoxWidth: (value) => {
+      seekbarPbpViewBoxWidth = value;
+    },
+    incrementSeekbarPbpZoomVersion: () => {
+      seekbarPbpZoomVersion += 1;
+    },
+    getWaveformZoomInputThreshold: () => waveformZoomInputThreshold,
+    snapTimelineSliderValue,
+    getTimelineScaleForSliderValue,
+    getNearestTimelineZoomNotchIndex,
+    getTimelineZoomNotchValue,
+    refreshSeekbarMetrics,
+    updateTimeMarkers,
+    scheduleSeekbarHoverSync,
+    scheduleSeekbarHoverSyncFromLastPoint,
+    syncSeekbarHoverFromClientPoint,
+    rememberSeekbarPointerClientPoint,
+    commitWaveformScale,
+  });
+  const clipWindowPlatformRuntime = createClipWindowPlatformRuntime({
+    tauriEnv: TAURI_ENV,
+    state: clipWindowPlatformState,
+    getShow: () => show,
+    getIsWindowWide: () => isWindowWide,
+    setIsWindowWide: (value) => {
+      isWindowWide = value;
+    },
+    getIsDocumentFullscreen: () => isDocumentFullscreen,
+    setIsDocumentFullscreen: (value) => {
+      isDocumentFullscreen = value;
+    },
+    focusPreviewStage,
+    scheduleTimelineRefresh,
+    syncPreviewLayoutAfterUiChange,
+    updateVideoDisplayMetrics,
+  });
+  let rightArrowHoldTimeout: ReturnType<typeof setTimeout> | null = null;
+  let isRightArrowFastForwardActive = false;
+  let rightArrowFastForwardWasPlaying = false;
+  let rightArrowPreviousPlaybackRate = 1;
+  const playbackHotkeyRuntime = createPlaybackHotkeyRuntime({
+    fastForwardHoldDelayMs: FAST_FORWARD_HOLD_DELAY_MS,
+    fastForwardPlaybackRate: FAST_FORWARD_PLAYBACK_RATE,
+    getShow: () => show,
+    getIsVideoLoaded: () => isVideoLoaded,
+    getVideoElement: () => videoElement,
+    getVideo: () => video,
+    getIsPlaying: () => isPlaying,
+    setIsPlaying: (value) => {
+      isPlaying = value;
+    },
+    getCurrentPlaybackRate: () => currentPlaybackRate,
+    setCurrentPlaybackRateValue: (value) => {
+      currentPlaybackRate = value;
+    },
+    getSelectedPlaybackRate,
+    getIsRightArrowFastForwardActive: () => isRightArrowFastForwardActive,
+    setIsRightArrowFastForwardActive: (value) => {
+      isRightArrowFastForwardActive = value;
+    },
+    getRightArrowFastForwardWasPlaying: () => rightArrowFastForwardWasPlaying,
+    setRightArrowFastForwardWasPlaying: (value) => {
+      rightArrowFastForwardWasPlaying = value;
+    },
+    getRightArrowPreviousPlaybackRate: () => rightArrowPreviousPlaybackRate,
+    setRightArrowPreviousPlaybackRate: (value) => {
+      rightArrowPreviousPlaybackRate = value;
+    },
+    getRightArrowHoldTimeout: () => rightArrowHoldTimeout,
+    setRightArrowHoldTimeout: (value) => {
+      rightArrowHoldTimeout = value;
+    },
+    usingMacOSNativePlayer,
+    playPrimaryPlayback,
+    pausePrimaryPlayback,
+    getPlaybackCurrentTime,
+    setPreviewTime,
+    syncWaveformWithVideo,
+    setCurrentPlaybackRate,
+    canBeClipped: (currentVideo) => canBeClipped(currentVideo as VideoItem),
+    setClipStartTime,
+    setClipEndTime,
+    seekToClipStart,
+    seekToClipEnd,
+    generateClip: openClipGenerateModal,
+    clearClipSelection,
+    getShowDetail: () => show_detail,
+    setShowDetail: (value) => {
+      show_detail = value;
+    },
+  });
+  function toggleDanmuFontMenu() {
+    if (!danmuEnabled) {
+      return;
+    }
+    danmuFontMenuController.open();
+  }
+
+  function handleDanmuFontSelect(fontFamily: string) {
+    if (!fontFamily) {
+      return;
+    }
+    danmakuStyle.fontFamily = fontFamily;
+    danmuFontMenuController.close();
+  }
+
+  function togglePbpMethodMenu() {
+    pbpMethodMenuController.open();
+  }
+
+  function handleSeekbarPbpMethodSelect(method: SeekbarPbpGenerationMethod) {
+    if (seekbarPbpGenerationMethod === method) {
+      pbpMethodMenuController.close();
+      return;
+    }
+    seekbarPbpGenerationMethod = method;
+    seekbarPbpZoomVersion += 1;
+    pbpMethodMenuController.close();
+  }
+
+  function handleDanmuToggle(event: Event) {
+    const target = event.currentTarget as HTMLInputElement | null;
+    danmuEnabled = target?.checked ?? false;
+    if (!danmuEnabled) {
+      clearActiveDanmus();
+      return;
+    }
+    rebuildDanmuPlayback(Math.floor(getPlaybackCurrentTime() * 1000));
+  }
+
+  function handleRenderDanmuEmotesToggle(event: Event) {
+    const target = event.currentTarget as HTMLInputElement | null;
+    renderDanmuEmotes = target?.checked ?? false;
+    if (danmuEnabled) {
+      rebuildDanmuPlayback(Math.floor(getPlaybackCurrentTime() * 1000));
+    }
+  }
+
+  function handleDanmuPreventSubtitleOcclusionToggle(event: Event) {
+    const target = event.currentTarget as HTMLInputElement | null;
+    danmuPreventSubtitleOcclusionEnabled = target?.checked ?? true;
+    if (danmuEnabled) {
+      rebuildDanmuPlayback(Math.floor(getPlaybackCurrentTime() * 1000));
+    }
+  }
+
+  function handleDanmuSyncWithPlaybackRateToggle(event: Event) {
+    const target = event.currentTarget as HTMLInputElement | null;
+    danmuSyncWithPlaybackRateEnabled = target?.checked ?? true;
+  }
+
+  function handleDanmuBoldToggle(event: Event) {
+    const target = event.currentTarget as HTMLInputElement | null;
+    danmakuStyle.bold = target?.checked ?? true;
+  }
+
+  let nextDanmuIndex = 0;
+  let lastDanmuTimeMs = 0;
+  let nextDanmuRenderId = 0;
+  let recentDanmuPositions: number[] = [];
+  let lastDanmuVideoId = -1;
+  let danmuEnabled = true;
+  let renderDanmuEmotes = true;
+  let danmuPreventSubtitleOcclusionEnabled = true;
+  let danmuSyncWithPlaybackRateEnabled = true;
+  let selectedPlaybackRate = 1;
+  let currentPlaybackRate = 1;
+  let danmakuStyle: DanmakuStyle = loadDanmakuStyle(roomId);
+  let danmakuDisplayAreaIndex = 4;
+  let danmakuSpeedPresetIndex = 2;
+  let danmakuMaxOnScreenIndex = 0;
+  let lastSavedDanmakuStyleSignature = "";
+  let danmakuEmoteMap: DanmakuEmoteMap = {};
+  const previewScaleBaseHeight = 720;
+  const waveformZoomInputThreshold = 24;
+  let danmakuBaseFontPx = DANMAKU_FONT_SIZE_PX * danmakuStyle.fontScale;
+  let videoDanmuFontSize = `${danmakuBaseFontPx}px`;
+  let videoDanmuFontFamily = danmakuStyle.fontFamily || DANMAKU_FONT_FAMILY;
+  let videoDanmuFontWeight = danmakuStyle.bold ? DANMAKU_FONT_WEIGHT : "normal";
+  const videoDanmuLineHeight = `${DANMAKU_LINE_HEIGHT}`;
+  const videoDanmuEmoteScale = `${DANMAKU_EMOTE_SCALE}`;
+  const videoDanmuEmoteOffset = `${DANMAKU_EMOTE_VERTICAL_OFFSET_EM}em`;
+  let videoDanmuOpacity = `${danmakuStyle.opacity}`;
+  const videoDanmuTextShadow = DANMAKU_TEXT_SHADOW;
+  let lastDanmuLayoutSignature = "";
+  let danmuLayoutConfig: DanmuLayoutConfig = {
+    containerWidthPx: 1280,
+    containerHeightPx: 720,
+    fontSizePx: DANMAKU_FONT_SIZE_PX,
+    lineHeight: DANMAKU_LINE_HEIGHT,
+    displayArea: danmakuStyle.displayArea,
+    speedPreset: danmakuStyle.speedPreset,
+    maxOnScreen: danmakuStyle.maxOnScreen,
+    preventSubtitleOcclusion: danmuPreventSubtitleOcclusionEnabled,
+  };
+  let danmuCanonicalLookbackConfig: DanmuLayoutConfig = {
+    ...danmuLayoutConfig,
+  };
+  let danmuActiveDurationMs = DANMU_ACTIVE_DURATION_MS;
+  let danmuAnimationRate = 1;
+  $: timelineSliderValue = getTimelineSliderValue();
+  $: showSubtitleTimelineEffective =
+    showSubtitleTimeline && subtitles.length > 0;
+  $: showSubtitleTimelineLayoutVisible =
+    showSubtitleTimelineEffective || reserveSubtitleTimelineLayoutDuringResize;
+  $: showWaveformLayoutVisible =
+    showWaveform || reserveWaveformLayoutDuringResize;
+  $: danmakuBaseFontPx = DANMAKU_FONT_SIZE_PX * danmakuStyle.fontScale;
+  $: videoDanmuOpacity = `${danmakuStyle.opacity}`;
+  $: videoDanmuFontFamily = danmakuStyle.fontFamily || DANMAKU_FONT_FAMILY;
+  $: videoDanmuFontWeight = danmakuStyle.bold ? DANMAKU_FONT_WEIGHT : "normal";
+  $: {
+    const nextDisplayAreaIndex = DANMAKU_DISPLAY_AREA_OPTIONS.indexOf(
+      danmakuStyle.displayArea,
+    );
+    if (
+      nextDisplayAreaIndex >= 0 &&
+      danmakuDisplayAreaIndex !== nextDisplayAreaIndex
+    ) {
+      danmakuDisplayAreaIndex = nextDisplayAreaIndex;
+    }
+  }
+  $: {
+    const clampedIndex = Math.max(
+      0,
+      Math.min(
+        DANMAKU_DISPLAY_AREA_OPTIONS.length - 1,
+        Math.round(danmakuDisplayAreaIndex),
+      ),
+    );
+    const mappedDisplayArea = DANMAKU_DISPLAY_AREA_OPTIONS[clampedIndex];
+    if (danmakuStyle.displayArea !== mappedDisplayArea) {
+      danmakuStyle.displayArea = mappedDisplayArea;
+    }
+    if (danmakuDisplayAreaIndex !== clampedIndex) {
+      danmakuDisplayAreaIndex = clampedIndex;
+    }
+  }
+  $: {
+    const nextSpeedPresetIndex = Math.max(
+      0,
+      Math.min(
+        DANMAKU_SPEED_PRESET_OPTIONS.length - 1,
+        Math.round(danmakuStyle.speedPreset),
+      ),
+    );
+    if (danmakuSpeedPresetIndex !== nextSpeedPresetIndex) {
+      danmakuSpeedPresetIndex = nextSpeedPresetIndex;
+    }
+  }
+  $: {
+    const clampedIndex = Math.max(
+      0,
+      Math.min(
+        DANMAKU_SPEED_PRESET_OPTIONS.length - 1,
+        Math.round(danmakuSpeedPresetIndex),
+      ),
+    );
+    if (danmakuStyle.speedPreset !== clampedIndex) {
+      danmakuStyle.speedPreset = clampedIndex as DanmakuStyle["speedPreset"];
+    }
+    if (danmakuSpeedPresetIndex !== clampedIndex) {
+      danmakuSpeedPresetIndex = clampedIndex;
+    }
+  }
+  $: {
+    const nextMaxOnScreenIndex = DANMAKU_MAX_ON_SCREEN_OPTIONS.indexOf(
+      danmakuStyle.maxOnScreen,
+    );
+    if (
+      nextMaxOnScreenIndex >= 0 &&
+      danmakuMaxOnScreenIndex !== nextMaxOnScreenIndex
+    ) {
+      danmakuMaxOnScreenIndex = nextMaxOnScreenIndex;
+    }
+  }
+  $: {
+    const clampedIndex = Math.max(
+      0,
+      Math.min(
+        DANMAKU_MAX_ON_SCREEN_OPTIONS.length - 1,
+        Math.round(danmakuMaxOnScreenIndex),
+      ),
+    );
+    const mappedMaxOnScreen = DANMAKU_MAX_ON_SCREEN_OPTIONS[clampedIndex];
+    if (danmakuStyle.maxOnScreen !== mappedMaxOnScreen) {
+      danmakuStyle.maxOnScreen =
+        mappedMaxOnScreen as DanmakuStyle["maxOnScreen"];
+    }
+    if (danmakuMaxOnScreenIndex !== clampedIndex) {
+      danmakuMaxOnScreenIndex = clampedIndex;
+    }
+  }
+  $: {
+    const signature = [
+      roomId,
+      danmakuStyle.fontScale.toFixed(3),
+      danmakuStyle.opacity.toFixed(3),
+      danmakuStyle.displayArea,
+      danmakuStyle.speedPreset,
+      danmakuStyle.maxOnScreen,
+      danmakuStyle.bold ? 1 : 0,
+      danmakuStyle.fontFamily,
+    ].join("|");
+    if (roomId && signature !== lastSavedDanmakuStyleSignature) {
+      lastSavedDanmakuStyleSignature = signature;
+      saveDanmakuStyle(roomId, danmakuStyle);
+    }
+  }
+  $: previewDisplayHeight =
+    videoDisplayHeight || videoHeight || previewScaleBaseHeight;
+  $: videoDanmuFontSize = `${previewDisplayHeight * (danmakuBaseFontPx / previewScaleBaseHeight)}px`;
+  $: danmuLayoutConfig = {
+    containerWidthPx: previewVideoFrameWidth || videoWidth || 1280,
+    containerHeightPx: previewVideoFrameHeight || previewDisplayHeight || 720,
+    fontSizePx: previewDisplayHeight * (danmakuBaseFontPx / previewScaleBaseHeight),
+    lineHeight: DANMAKU_LINE_HEIGHT,
+    displayArea: danmakuStyle.displayArea,
+    speedPreset: danmakuStyle.speedPreset,
+    maxOnScreen: danmakuStyle.maxOnScreen,
+    preventSubtitleOcclusion: danmuPreventSubtitleOcclusionEnabled,
+  };
+  $: danmuCanonicalLookbackConfig = {
+    ...danmuLayoutConfig,
+    containerWidthPx: 1280,
+    containerHeightPx: 720,
+    fontSizePx: danmakuBaseFontPx,
+  };
+  $: danmuActiveDurationMs = Math.max(
+    getDanmuMaxActiveDurationMs({
+      layout: danmuLayoutConfig,
+    }),
+    getDanmuMaxActiveDurationMs({
+      layout: danmuCanonicalLookbackConfig,
+    }),
+  );
+  $: danmuAnimationRate = Math.max(
+    danmuSyncWithPlaybackRateEnabled ? currentPlaybackRate : 1,
+    0.1,
+  );
+  $: {
+    const layoutSignature = [
+      danmuLayoutConfig.containerWidthPx.toFixed(2),
+      danmuLayoutConfig.containerHeightPx.toFixed(2),
+      danmuLayoutConfig.fontSizePx.toFixed(2),
+      danmuLayoutConfig.displayArea,
+      danmuLayoutConfig.speedPreset,
+      danmuLayoutConfig.maxOnScreen,
+      danmuLayoutConfig.preventSubtitleOcclusion ? 1 : 0,
+      renderDanmuEmotes ? 1 : 0,
+    ].join("|");
+    if (
+      danmuEnabled &&
+      danmuRecords.length > 0 &&
+      lastDanmuLayoutSignature &&
+      layoutSignature !== lastDanmuLayoutSignature
+    ) {
+      rebuildDanmuPlayback(Math.floor(getPlaybackCurrentTime() * 1000));
+    }
+    lastDanmuLayoutSignature = layoutSignature;
+  }
+  $: {
+    const duration = videoElement?.duration ?? 0;
+    if (duration > 0) {
+      const finestVisibleSeconds = Math.min(duration / 10, 120);
+      maxTimelineScale = Math.max(1, duration / finestVisibleSeconds);
+    } else {
+      maxTimelineScale = 10;
+    }
+
+    if (timelineScale > maxTimelineScale) {
+      timelineScale = maxTimelineScale;
+    }
+
+    if (waveformScale > maxTimelineScale) {
+      waveformScale = maxTimelineScale;
+    }
+  }
+
+  function getVideoDanmuEmoteStyle(
+    segments: DanmakuSegment[],
+    index: number,
+  ): string {
+    const spacing = getDanmakuEmoteTextGap(segments, index);
+    return `margin-left: ${spacing.marginLeftEm}em; margin-right: ${spacing.marginRightEm}em;`;
+  }
+
+  function updateVideoDisplayMetrics(reason = "unknown") {
+    void syncFullscreenState();
+
+    if (arePreviewDisplayMetricsFrozen) {
+      return;
+    }
+    const metrics = resolvePreviewDisplayMetrics({
+      previewStageElement,
+      videoElement,
+      videoWidth,
+      videoHeight,
+    });
+    previewStageViewportTop = metrics.previewStageViewportTop;
+    previewStageViewportLeft = metrics.previewStageViewportLeft;
+    previewStageViewportWidth = metrics.previewStageViewportWidth;
+    previewStageViewportHeight = metrics.previewStageViewportHeight;
+    previewVideoFrameTop = metrics.previewVideoFrameTop;
+    previewVideoFrameLeft = metrics.previewVideoFrameLeft;
+    previewVideoFrameWidth = metrics.previewVideoFrameWidth;
+    previewVideoFrameHeight = metrics.previewVideoFrameHeight;
+    videoDisplayHeight = metrics.videoDisplayHeight;
+
+    if (isMacOSNativePlayerActive) {
+      void macOSNativeClipPlayerRuntime.syncBounds(
+        false,
+        `display-metrics:${reason}`,
+      );
+    }
+  }
+
+  function watchVideoDisplayMetrics() {
+    const observedElement = previewStageElement ?? videoElement;
+    if (!observedElement) {
+      return;
+    }
+
+    if (videoResizeObserver) {
+      videoResizeObserver.disconnect();
+    }
+
+    if (typeof ResizeObserver !== "undefined") {
+      videoResizeObserver = new ResizeObserver(() => {
+        updateVideoDisplayMetrics("resize-observer");
+      });
+      videoResizeObserver.observe(observedElement);
+    }
+
+    updateVideoDisplayMetrics("watch-init");
+  }
+
+  $: stablePreviewVideoFrameStyle =
+    previewVideoFrameWidth > 0 && previewVideoFrameHeight > 0
+      ? `top:${previewStageViewportTop + previewVideoFrameTop}px;left:${previewStageViewportLeft + previewVideoFrameLeft}px;width:${previewVideoFrameWidth}px;height:${previewVideoFrameHeight}px;`
+      : "display:none;";
+
+  function getStablePreviewStageOverlayStyle() {
+    return `top:${previewStageViewportTop + 8}px;left:${previewStageViewportLeft + 8}px;`;
+  }
+
+  function setPreviewDisplayMetricsFrozen(frozen: boolean) {
+    arePreviewDisplayMetricsFrozen = frozen;
+  }
+
+  function lockPreviewStageHeightForPanelTransition() {
+    if (previewStageHeightLockPx !== null || !previewStageElement) {
+      return;
+    }
+    const rect = previewStageElement.getBoundingClientRect();
+    if (!Number.isFinite(rect.height) || rect.height <= 0) {
+      return;
+    }
+    previewStageHeightLockPx = Number(rect.height.toFixed(2));
+  }
+
+  function unlockPreviewStageHeightForPanelTransition() {
+    if (previewStageHeightLockPx === null) {
+      return;
+    }
+    previewStageHeightLockPx = null;
+  }
+
+  function cancelPreviewLayoutSync() {
+    cancelPreviewLayoutSyncRuntime(clipWindowLayoutState);
+  }
+
+  async function syncPreviewLayoutAfterUiChange() {
+    await syncPreviewLayoutAfterUiChangeRuntime({
+      state: clipWindowLayoutState,
+      tick,
+      updateVideoDisplayMetrics,
+    });
+  }
+
+  function suppressClipWindowResizeRefresh(durationMs: number) {
+    suppressClipWindowResizeRefreshRuntime({
+      tauriEnv: TAURI_ENV,
+      durationMs,
+      state: clipWindowLayoutState,
+    });
+  }
+
+  function shouldSuppressClipWindowResizeRefresh() {
+    return shouldSuppressClipWindowResizeRefreshRuntime(clipWindowLayoutState);
+  }
+
+  function getAdaptiveClipWindowHeightForState(
+    subtitleTimelineVisible: boolean,
+    waveformVisible: boolean,
+  ) {
+    return getAdaptiveClipWindowHeightForStateRuntime({
+      baseHeight: CLIP_WINDOW_BASE_HEIGHT,
+      subtitleExtraHeight: CLIP_WINDOW_SUBTITLE_TIMELINE_EXTRA_HEIGHT,
+      waveformExtraHeight: CLIP_WINDOW_WAVEFORM_EXTRA_HEIGHT,
+      subtitleTimelineVisible,
+      waveformVisible,
+    });
+  }
+
+  function getAdaptiveClipWindowHeight() {
+    return getAdaptiveClipWindowHeightForState(
+      showSubtitleTimelineEffective,
+      showWaveform,
+    );
+  }
+
+  function cancelClipWindowHeightSync() {
+    cancelClipWindowHeightSyncRuntime(clipWindowLayoutState);
+  }
+
+  function syncClipWindowHeightAfterLayout(
+    force = false,
+    targetHeightOverride?: number,
+  ) {
+    void (async () => {
+      await tick();
+      await syncClipWindowHeight(force, targetHeightOverride);
+    })();
+  }
+
+  async function syncClipWindowHeight(
+    force = false,
+    targetHeightOverride?: number,
+  ) {
+    await syncClipWindowHeightRuntime({
+      tauriEnv: TAURI_ENV,
+      show,
+      isWindowWide,
+      isWebFullscreen,
+      isDocumentFullscreen,
+      targetHeight: Math.round(
+        targetHeightOverride ?? getAdaptiveClipWindowHeight(),
+      ),
+      thresholdPx: CLIP_WINDOW_HEIGHT_SYNC_THRESHOLD_PX,
+      resizeKeepTopLeft: (width, height) =>
+        invoke("macos_native_player_set_host_window_inner_size_keep_top_left", {
+          width,
+          height,
+        }),
+    });
+  }
+
+  function usingMacOSNativePlayer() {
+    return usingMacOSNativePlayerValue;
+  }
+
+  function shouldUseMacOSNativePlayer() {
+    return shouldUseMacOSNativePlayerValue;
+  }
+
+  function shouldPreferMacOSNativePlayerPresentation() {
+    return shouldPreferMacOSNativePlayerPresentationValue;
+  }
+
+  async function ensureMacOSNativePlayerMounted(reason: string) {
+    void reason;
+
+    if (
+      macOSNativePlayerMountPending ||
+      !show ||
+      !isVideoLoaded ||
+      !shouldUseMacOSNativePlayer() ||
+      isMacOSNativePlayerActive ||
+      !video?.file
+    ) {
+      return false;
+    }
+
+    macOSNativePlayerMountPending = true;
+
+    try {
+      await tick();
+
+      if (
+        !show ||
+        !isVideoLoaded ||
+        !shouldUseMacOSNativePlayer() ||
+        isMacOSNativePlayerActive ||
+        !video?.file
+      ) {
+        return false;
+      }
+
+      return await macOSNativeClipPlayerRuntime.mount();
+    } finally {
+      macOSNativePlayerMountPending = false;
+    }
+  }
+
+  $: shouldUseMacOSNativePlayerValue =
+    TAURI_ENV &&
+    macOSNativePlayerAvailable &&
+    (config?.use_native_clip_player ?? true);
+
+  $: shouldRenderMacOSNativePlayerPresentationValue =
+    shouldUseMacOSNativePlayerValue && !macOSNativePlayerMountFailed;
+
+  $: shouldPreferMacOSNativePlayerPresentationValue =
+    (shouldUseMacOSNativePlayerValue && !macOSNativePlayerMountFailed) ||
+    forceDomPreviewHidden ||
+    isMacOSNativePlayerActive;
+
+  $: showMacOSNativePlayerUnderlayValue =
+    shouldRenderMacOSNativePlayerPresentationValue && isMacOSNativePlayerActive;
+
+  $: usingMacOSNativePlayerValue =
+    shouldUseMacOSNativePlayerValue && isMacOSNativePlayerActive;
+
+  $: if (
+    show &&
+    isVideoLoaded &&
+    shouldUseMacOSNativePlayerValue &&
+    !isMacOSNativePlayerActive &&
+    !macOSNativePlayerMountPending &&
+    video?.file
+  ) {
+    void ensureMacOSNativePlayerMounted("reactive-ensure");
+  }
+
+  $: isVolumeMutedValue = isMuted || volume === 0;
+
+  $: if (lastIsPlayingState !== isPlaying) {
+    playIconSeed += 1;
+    lastIsPlayingState = isPlaying;
+  }
+
+  $: if (lastVolumeMutedState !== isVolumeMutedValue) {
+    volumeIconSeed += 1;
+    lastVolumeMutedState = isVolumeMutedValue;
+  }
+
+  $: showFastForwardOverlayValue =
+    rightArrowHoldTimeout !== null || isRightArrowFastForwardActive;
+
+  $: canAdjustPlaybackRateValue = !(
+    isRightArrowFastForwardActive || rightArrowHoldTimeout !== null
+  );
+
+  $: {
+    const isFastForwarding =
+      isRightArrowFastForwardActive || rightArrowHoldTimeout !== null;
+    const selectedRate = Math.max(0.1, selectedPlaybackRate || 1);
+    const runtimeRate = Math.max(0.1, currentPlaybackRate || 1);
+    playbackRateDisplayLabelValue = computePlaybackRateButtonLabel({
+      selectedRate,
+      runtimeRate,
+      isFastForwarding,
+      fastForwardPlaybackRate: FAST_FORWARD_PLAYBACK_RATE,
+    });
+  }
+
+  $: {
+    videoElement;
+    isVideoLoaded;
+    playbackDurationValue = Math.max(0, videoElement?.duration ?? 0);
+  }
+
+  $: {
+    const duration = getSeekbarDuration();
+    const playbackTime = isDraggingSeekbar ? previewTime : currentTime;
+    const pointerTime = isDraggingSeekbar ? previewTime : seekbarHoverTime;
+
+    seekbarCurrentRatioValue =
+      duration > 0 ? clamp01(playbackTime / duration) : 0;
+    seekbarCurrentXValue = seekbarMetricsWidth * seekbarCurrentRatioValue;
+
+    seekbarPointerRatioValue =
+      duration > 0 ? clamp01(pointerTime / duration) : 0;
+    seekbarPointerXValue = seekbarMetricsWidth * seekbarPointerRatioValue;
+
+    showSeekbarPopupValue = isDraggingSeekbar || isSeekbarHovering;
+    showSeekbarMoveIndicatorValue = isSeekbarHovering && !isDraggingSeekbar;
+    seekbarPopupTimeValue =
+      duration > 0 ? normalizeSeekbarPreviewTime(pointerTime, duration) : 0;
+
+    const maxPopupLeft = Math.max(
+      0,
+      seekbarMetricsWidth - SEEKBAR_PREVIEW_WIDTH,
+    );
+    seekbarPopupLeftValue = Math.max(
+      0,
+      Math.min(maxPopupLeft, seekbarPointerXValue - SEEKBAR_PREVIEW_WIDTH / 2),
+    );
+  }
+
+  $: seekbarPopupViewportLeftValue =
+    seekbarViewportLeft + seekbarPopupLeftValue;
+  $: seekbarPopupViewportTopValue =
+    seekbarViewportTop +
+    seekbarViewportHeight -
+    SEEKBAR_PULL_INDICATOR_SIZE -
+    SEEKBAR_PREVIEW_HEIGHT;
+  $: seekbarPbpPlayedWidth =
+    clamp01(seekbarCurrentRatioValue) * SEEKBAR_PBP_VIEWBOX_WIDTH;
+  $: seekbarPbpVisible =
+    showPbpOverlay &&
+    getSeekbarDuration() > 0 &&
+    (danmuRecords.length > 0 || hasBilibiliPbpData);
+  $: if (timelineContainer) {
+    syncTimelineScrollMetrics();
+  }
+  $: seekbarPbpViewBoxValue = `${seekbarPbpViewBoxX.toFixed(3)} 0 ${seekbarPbpViewBoxWidth.toFixed(3)} ${SEEKBAR_PBP_VIEWBOX_HEIGHT}`;
+  $: {
+    const duration = getSeekbarDuration();
+    const durationKey = Number.isFinite(duration) ? duration.toFixed(3) : "0";
+    const firstTs = danmuRecords[0]?.ts ?? -1;
+    const lastTs = danmuRecords[danmuRecords.length - 1]?.ts ?? -1;
+    const densityCacheKey = [
+      video?.id ?? "none",
+      durationKey,
+      seekbarPbpGenerationMethod,
+      danmuRecords.length,
+      firstTs,
+      lastTs,
+      hasBilibiliPbpData ? `${bilibiliPbpData?.cid}:${bilibiliPbpData?.values.length}` : "no-pbp",
+    ].join("|");
+    if (
+      seekbarPbpGenerationMethod !== "bilibili_pbp" &&
+      densityCacheKey !== seekbarPbpGlobalMaxDensityCacheKey
+    ) {
+      seekbarPbpGlobalMaxDensityCacheKey = densityCacheKey;
+      seekbarPbpGlobalMaxDensity = resolveSeekbarPbpGlobalMaxDensity(
+        danmuRecords,
+        duration,
+        seekbarPbpGenerationMethod,
+      );
+    }
+
+    const timelineScaleKey =
+      Number.isFinite(timelineScale) && timelineScale > 0
+        ? timelineScale.toFixed(4)
+        : "1";
+    const sampleCount = resolveSeekbarPbpSampleCount(duration, timelineScale);
+    const nextCacheKey = [
+      densityCacheKey,
+      timelineScaleKey,
+      sampleCount,
+      seekbarPbpZoomVersion,
+      seekbarPbpGlobalMaxDensity.toFixed(4),
+    ].join("|");
+    if (nextCacheKey !== seekbarPbpCurveCacheKey) {
+      seekbarPbpCurveCacheKey = nextCacheKey;
+      seekbarPbpCurvePath =
+        seekbarPbpGenerationMethod === "bilibili_pbp" && hasBilibiliPbpData
+          ? buildBilibiliSeekbarPbpCurvePath(bilibiliPbpData, duration)
+          : buildSeekbarPbpCurvePath(
+              danmuRecords,
+              duration,
+              timelineScale,
+              seekbarPbpGlobalMaxDensity,
+              seekbarPbpGenerationMethod,
+            );
+    }
+  }
+
+  $: if (showSeekbarPopupValue) {
+    seekbarThumbnailRuntime.queueForTime(seekbarPopupTimeValue);
+  }
+
+  $: effectiveVolumePercentValue = Math.round(
+    Math.max(0, Math.min(1, isMuted ? 0 : volume)) * 100,
+  );
+
+  $: macOSNativePlayerWindowedPreviewCompensationValue = Math.round(
+    config?.native_clip_player_windowed_offset ??
+      DEFAULT_MACOS_NATIVE_PLAYER_WINDOWED_PREVIEW_COMPENSATION,
+  );
+
+  $: threePlayrateHintTopValue =
+    18 +
+    (showMacOSNativePlayerUnderlayValue && !isDocumentFullscreen
+      ? macOSNativePlayerWindowedPreviewCompensationValue
+      : 0);
+
+  $: suspendMacOSNativePlayerUnderlayForPopupValue =
+    MACOS_NATIVE_PLAYER_POPUP_FALLBACK_ENABLED &&
+    (isPlaybackRateMenuVisible ||
+      isPreviewDisplayMenuVisible ||
+      isVolumeMenuVisible ||
+      isDanmuFontMenuVisible);
+
+  function shouldHideDomPreview() {
+    return shouldHideMacOSNativeDomPreview({
+      forceDomPreviewHidden,
+      usingMacOSNativePlayer: usingMacOSNativePlayer(),
+      shouldPreferMacOSNativePlayerPresentation:
+        shouldPreferMacOSNativePlayerPresentation(),
+    });
+  }
+
+  function getEffectiveVolume() {
+    return isMuted ? 0 : volume;
+  }
+
+  function applyVolumeToPlayback() {
+    if (videoElement) {
+      videoElement.volume = getEffectiveVolume();
+    }
+    void macOSNativeClipPlayerRuntime.syncVolume();
+  }
+
+  function getSelectedPlaybackRate() {
+    return Math.max(0.1, selectedPlaybackRate || 1);
+  }
+
+  function getPreviewDisplayMenuMetrics() {
+    return resolveAnchoredMenuMetrics({
+      locked: isPreviewDisplayMenuInteractionLocked,
+      lockedRect: previewDisplayMenuLockedRect,
+      anchor: previewSettingsControlElement ?? previewSettingsButtonElement,
+      width: PREVIEW_DISPLAY_MENU_WIDTH,
+      height: PREVIEW_DISPLAY_MENU_HEIGHT,
+    });
+  }
+
+  function openPreviewDisplayMenu() {
+    previewDisplayMenuController.open();
+  }
+
+  function handleSettingsMouseEnter() {
+    if (isPreviewDisplayMenuInteractionLocked) {
+      isSettingsHover = false;
+      return;
+    }
+    isSettingsHover = true;
+    openPreviewDisplayMenu();
+  }
+
+  function handleSettingsMouseLeave() {
+    isSettingsHover = false;
+    previewDisplayMenuController.scheduleClose();
+  }
+
+  function setPreviewDisplayMenuInteractionLocked(locked: boolean) {
+    if (locked && isPreviewDisplayMenuVisible) {
+      previewDisplayMenuLockedRect = captureElementRect(
+        previewDisplayMenuElement,
+      );
+    }
+    isPreviewDisplayMenuInteractionLocked = locked;
+    previewDisplayMenuController.cancelHide();
+    if (locked) {
+      if (!isPreviewDisplayMenuVisible) {
+        isSettingsHover = false;
+      }
+    } else {
+      previewDisplayMenuLockedRect = null;
+    }
+  }
+
+  function setPreviewOverlayLayersSuppressed(suppressed: boolean) {
+    suppressPreviewOverlayLayersValue = suppressed;
+  }
+
+  async function togglePreviewDisplaySubtitleTimeline() {
+    await tick();
+    toggleSubtitleTimeline();
+  }
+
+  async function togglePreviewDisplayWaveform() {
+    await tick();
+    toggleWaveform();
+  }
+
+  async function togglePreviewDisplayPbp() {
+    await tick();
+    showPbpOverlay = !showPbpOverlay;
+  }
+
+  async function handlePbpOverlayMouseDown(event: MouseEvent) {
+    await resetRightArrowFastForward(false, "pbp-click");
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (!videoElement) {
+      return;
+    }
+
+    const target = event.currentTarget as HTMLElement | null;
+    const rect = target?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) {
+      return;
+    }
+
+    const clampedX = Math.max(
+      0,
+      Math.min(event.clientX - rect.left, rect.width),
+    );
+    const duration = getSeekbarDuration();
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return;
+    }
+
+    const localRatio = clamp01(clampedX / rect.width);
+    const visibleStartRatio = clamp01(
+      seekbarPbpViewBoxX / SEEKBAR_PBP_VIEWBOX_WIDTH,
+    );
+    const visibleWidthRatio = Math.max(
+      0.0001,
+      Math.min(1, seekbarPbpViewBoxWidth / SEEKBAR_PBP_VIEWBOX_WIDTH),
+    );
+    const timeRatio = clamp01(
+      visibleStartRatio + localRatio * visibleWidthRatio,
+    );
+    const time = timeRatio * duration;
+    setPreviewTime(time);
+    seekbarHoverTime = normalizeSeekbarPreviewTime(time, duration);
+    rememberSeekbarPointerClientPoint(event.clientX, event.clientY);
+  }
+
+  async function syncFullscreenState() {
+    await clipWindowPlatformRuntime.syncFullscreenState();
+  }
+
+  async function requestFullscreenLayoutRefresh() {
+    await clipWindowPlatformRuntime.requestFullscreenLayoutRefresh();
+  }
+
+  async function waitForWindowBoundsStable(maxMs = 320, settleMs = 80) {
+    return clipWindowPlatformRuntime.waitForWindowBoundsStable(maxMs, settleMs);
+  }
+
+  function handleViewportResize() {
+    void requestFullscreenLayoutRefresh();
+    scheduleTimelineRefresh();
+  }
+
+  function handleDocumentFullscreenChange() {
+    void requestFullscreenLayoutRefresh();
+  }
+
+  function cancelFullscreenExitFocusRestore() {
+    clipWindowPlatformRuntime.cancelFullscreenExitFocusRestore();
+  }
+
+  function restorePreviewHotkeyFocusAfterFullscreenExit() {
+    clipWindowPlatformRuntime.restorePreviewHotkeyFocusAfterFullscreenExit();
+  }
+
+  function clearVolumeClickAnimationTimer() {
+    const windowObject = getBrowserWindow();
+    if (volumeClickAnimationTimer !== null && windowObject) {
+      windowObject.clearTimeout(volumeClickAnimationTimer);
+    }
+    volumeClickAnimationTimer = null;
+  }
+
+  function triggerVolumeClickAnimation(nextMuted: boolean) {
+    const windowObject = getBrowserWindow();
+    if (!windowObject) {
+      isVolumeClickAnimating = false;
+      return;
+    }
+
+    clearVolumeClickAnimationTimer();
+    isVolumeClickAnimating = true;
+    const durationMs = getLottieDurationMs(
+      nextMuted ? muteLottieData : volumeLottieData,
+      500,
+    );
+    volumeClickAnimationTimer = windowObject.setTimeout(() => {
+      isVolumeClickAnimating = false;
+      volumeClickAnimationTimer = null;
+    }, durationMs);
+  }
+
+  function handleVolumeMouseEnter() {
+    isVolumeHover = true;
+    volumeMenuController.open();
+  }
+
+  function handleVolumeMouseLeave() {
+    isVolumeHover = false;
+    isVolumeHoverSuppressed = false;
+    volumeMenuController.scheduleClose();
+  }
+  function toggleWebFullscreen() {
+    isWebFullscreen = !isWebFullscreen;
+    scheduleTimelineRefresh();
+    void syncPreviewLayoutAfterUiChange();
+  }
+
+  function clamp01(value: number) {
+    return Math.max(0, Math.min(1, value));
+  }
+
+  function getLottieDurationMs(
+    animationData: Record<string, unknown>,
+    fallbackMs = 500,
+  ) {
+    const data = animationData as { fr?: number; ip?: number; op?: number };
+    const frameRate = Number(data.fr);
+    const outPoint = Number(data.op);
+    const inPoint = Number(data.ip ?? 0);
+    if (
+      Number.isFinite(frameRate) &&
+      frameRate > 0 &&
+      Number.isFinite(outPoint)
+    ) {
+      const durationFrames = Math.max(0, outPoint - inPoint);
+      if (durationFrames > 0) {
+        return Math.max(80, Math.round((durationFrames / frameRate) * 1000));
+      }
+    }
+    return fallbackMs;
+  }
+
+  async function toggleFullscreen() {
+    await clipWindowPlatformRuntime.toggleFullscreen();
+  }
+
+  async function toggleWindowWide() {
+    await clipWindowPlatformRuntime.toggleWindowWide();
+  }
+
+  function applySelectedPlaybackRate(refreshDanmu = true) {
+    const nextRate = getSelectedPlaybackRate();
+
+    if (usingMacOSNativePlayer() && !isPlaying) {
+      currentPlaybackRate = nextRate;
+
+      if (refreshDanmu && danmuEnabled) {
+        rebuildDanmuPlayback(Math.floor(getPlaybackCurrentTime() * 1000));
+      }
+      return;
+    }
+
+    setCurrentPlaybackRate(nextRate, refreshDanmu);
+  }
+
+  function handlePlaybackRateSelect(nextRate: number) {
+    if (!Number.isFinite(nextRate)) {
+      return;
+    }
+
+    selectedPlaybackRate = nextRate;
+
+    if (!canAdjustPlaybackRateValue) {
+      return;
+    }
+
+    applySelectedPlaybackRate(false);
+    playbackRateMenuController.close();
+  }
+
+  $: if (!canAdjustPlaybackRateValue && isPlaybackRateMenuVisible) {
+    playbackRateMenuController.close();
+  }
+
+  $: if (
+    (!danmuEnabled || activeTab !== "danmu" || !show) &&
+    isDanmuFontMenuVisible
+  ) {
+    danmuFontMenuController.close();
+  }
+
+  $: if ((activeTab !== "danmu" || !show) && isPbpMethodMenuVisible) {
+    pbpMethodMenuController.close();
+  }
+
+  $: if (!show && isVideoSelectMenuVisible) {
+    videoSelectMenuController.close();
+  }
+
+  $: {
+    forceDomPreviewHidden;
+    isMacOSNativePlayerActive;
+    macOSNativePlayerAvailable;
+    macOSNativePlayerMountFailed;
+    config;
+    videoElement;
+    macOSNativeClipPlayerRuntime.syncDomPreviewVisibility();
+  }
+
+  $: {
+    suspendMacOSNativePlayerUnderlayForPopupValue;
+    isMacOSNativePlayerActive;
+    macOSNativePlayerAvailable;
+    macOSNativePlayerMountFailed;
+    void macOSNativeClipPlayerRuntime.syncPresentationMode(
+      TAURI_ENV &&
+        macOSNativePlayerAvailable &&
+        isMacOSNativePlayerActive &&
+        suspendMacOSNativePlayerUnderlayForPopupValue,
+    );
+  }
+
+  function getPlaybackCurrentTime() {
+    return Math.max(
+      0,
+      usingMacOSNativePlayer()
+        ? currentTime
+        : (videoElement?.currentTime ?? currentTime),
+    );
+  }
+
+  function getSeekbarDuration() {
+    return Math.max(0, playbackDurationValue || videoElement?.duration || 0);
+  }
+
+  function normalizeSeekbarPreviewTime(
+    time: number,
+    durationOverride = getSeekbarDuration(),
+  ) {
+    const duration = Math.max(0, durationOverride);
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return 0;
+    }
+    if (!Number.isFinite(time)) {
+      return 0;
+    }
+    return Math.max(0, Math.min(duration, time));
+  }
+
+  function resetSeekbarPreviewState(resetCache = false) {
+    seekbarInteractionRuntime.resetSeekbarPreviewState(resetCache);
+  }
+
+  function refreshSeekbarMetrics() {
+    seekbarInteractionRuntime.refreshSeekbarMetrics();
+  }
+
+  function rememberSeekbarPointerClientPoint(clientX: number, clientY: number) {
+    seekbarInteractionRuntime.rememberSeekbarPointerClientPoint(
+      clientX,
+      clientY,
+    );
+  }
+
+  function scheduleSeekbarHoverSync(clientX: number, clientY: number) {
+    seekbarInteractionRuntime.scheduleSeekbarHoverSync(clientX, clientY);
+  }
+
+  function scheduleSeekbarHoverSyncFromLastPoint() {
+    seekbarInteractionRuntime.scheduleSeekbarHoverSyncFromLastPoint();
+  }
+
+  function playPrimaryPlayback() {
+    macOSNativePauseRequestPending = false;
+    if (usingMacOSNativePlayer()) {
+      const targetRate = isRightArrowFastForwardActive
+        ? FAST_FORWARD_PLAYBACK_RATE
+        : getSelectedPlaybackRate();
+      void setMacOSNativePlayerRate(targetRate, MACOS_NATIVE_PLAYER_ID).catch((error) => {
+        console.warn("Failed to start macOS native playback:", error);
+      });
+      return;
+    }
+
+    if (!videoElement) {
+      return;
+    }
+
+    void videoElement.play().catch((error) => {
+      console.warn("Failed to start playback:", error);
+    });
+  }
+
+  function pausePrimaryPlayback() {
+    if (usingMacOSNativePlayer()) {
+      macOSNativePauseRequestPending = true;
+      isPlaying = false;
+      void pauseMacOSNativePlayer(MACOS_NATIVE_PLAYER_ID).catch((error) => {
+        macOSNativePauseRequestPending = false;
+        console.warn("Failed to pause macOS native playback:", error);
+      });
+      return;
+    }
+
+    videoElement?.pause();
+  }
+
+  function getMacOSNativePlayerWindowedYOffset() {
+    return computeMacOSNativePlayerWindowedYOffset({
+      tauriEnv: TAURI_ENV,
+      isDocumentFullscreen,
+      compensation: macOSNativePlayerWindowedPreviewCompensationValue,
+    });
+  }
+
+  function getMacOSNativePlayerTargetRect() {
+    return computeMacOSNativePlayerTargetRect({
+      previewStageElement,
+      previewVideoFrameLeft,
+      previewVideoFrameTop,
+      previewVideoFrameWidth,
+      previewVideoFrameHeight,
+      shouldUseMacOSNativePlayer: shouldUseMacOSNativePlayerValue,
+      windowedYOffset: getMacOSNativePlayerWindowedYOffset(),
+    });
+  }
+
+  function suspendMacOSNativePlayerBoundsSync(reason: string) {
+    macOSNativeClipPlayerRuntime.suspendBoundsSync(reason);
+  }
+
+  function resumeMacOSNativePlayerBoundsSync(reason: string) {
+    macOSNativeClipPlayerRuntime.resumeBoundsSync(reason);
+  }
 
   // 获取 profile 从 localStorage
   function get_profile(): Profile {
@@ -160,83 +2164,58 @@
     }
   }
 
-  async function createWaveSurfer() {
-    // 使用更稳定的容器查找方式
-    const container = document.querySelector(
-      "[data-waveform-container]"
-    ) as HTMLElement;
-
-    if (!container || !video?.file) {
-      console.log("Missing container or video file:", {
-        container,
-        videoFile: video?.file,
-      });
-      return;
-    }
-
-    // 确保容器有正确的尺寸，考虑 timeline scale
-    container.style.width = `${100 * timelineScale}%`;
-    container.style.height = "60px";
-    container.style.minHeight = "60px";
-    container.style.display = "block";
-
-    console.log("Creating WaveSurfer with:", {
-      container: container,
-      file: video.file,
-      containerDimensions: {
-        width: container.offsetWidth,
-        height: container.offsetHeight,
-      },
+  function ensureWaveformData(): Promise<AudioWaveformData> {
+    const state = {
+      waveformDataPromise,
+      waveformDataVideoId,
+    };
+    const nextPromise = ensureWaveformDataRuntime({
+      videoId: video?.id,
+      state,
+      invoke,
     });
+    waveformDataPromise = state.waveformDataPromise;
+    waveformDataVideoId = state.waveformDataVideoId;
+    return nextPromise;
+  }
+
+  async function createWaveSurfer() {
+    const container = document.querySelector(
+      "[data-waveform-container]",
+    ) as HTMLElement | null;
 
     try {
-      wavesurfer = WaveSurfer.create({
-        container: container,
-        waveColor: "#4a5568",
-        progressColor: "#0A84FF",
-        cursorColor: "#0A84FF",
-        barWidth: 2,
-        barRadius: 1,
-        height: 60,
-        normalize: true,
-        interact: true, // 启用交互，允许点击切换进度
-        plugins: [],
+      const runtime = await createWaveSurferRuntime({
+        container,
+        videoFile: video?.file,
+        showWaveform,
+        panelHeightPx: WAVEFORM_PANEL_HEIGHT_PX,
+        barHeightRatio: WAVEFORM_BAR_HEIGHT_RATIO,
+        formatTimelineMarkerTime,
+        ensureWaveformData,
+        setPreviewTime,
+        getVideoDuration: () => videoElement?.duration ?? 0,
+        hasManagedClipSelection: (id) =>
+          clipSelections.some((selection) => selection.id === id),
+        hasPendingClipStartMarker: () => hasPendingClipStartMarker,
+        setActiveClipSelection,
+        updateClipSelectionFromRegion,
+        syncClipWaveformRegionAppearance,
+        syncClipWaveformRegions,
+        onLoadingStateChange: (loading) => {
+          isWaveformLoading = loading;
+        },
+        onReadyStateChange: (loaded) => {
+          isWaveformLoaded = loaded;
+        },
       });
 
-      // 加载音频
-      await invoke("generate_audio_sample", {
-        videoId: video.id,
-      });
-      let opus_file = video.file.replace(".mp4", ".opus");
-      console.log("WaveSurfer created, loading file:", opus_file);
-      wavesurfer.load(opus_file);
+      if (!runtime) {
+        return;
+      }
 
-      // 监听加载完成
-      wavesurfer.on("ready", () => {
-        isWaveformLoaded = true;
-        isWaveformLoading = false;
-        console.log("Waveform loaded successfully");
-        console.log("WaveSurfer instance:", wavesurfer);
-      });
-
-      // 监听点击事件，同步视频进度
-      wavesurfer.on("interaction", (newTime: number) => {
-        if (videoElement && videoElement.duration) {
-          videoElement.currentTime = newTime;
-          currentTime = newTime;
-        }
-      });
-
-      // 监听错误
-      wavesurfer.on("error", (e: any) => {
-        console.error("WaveSurfer error:", e);
-        isWaveformLoading = false;
-      });
-
-      // 监听加载进度
-      wavesurfer.on("loading", (percent: number) => {
-        console.log("WaveSurfer loading:", percent + "%");
-      });
+      wavesurfer = runtime.wavesurfer;
+      waveformRegions = runtime.waveformRegions;
     } catch (error) {
       console.error("Failed to create WaveSurfer:", error);
     }
@@ -244,99 +2223,354 @@
 
   // 同步波形图与视频进度
   function syncWaveformWithVideo() {
-    if (
-      !wavesurfer ||
-      !videoElement ||
-      !isWaveformLoaded ||
-      !videoElement.duration
-    )
-      return;
-
-    try {
-      const progress = videoElement.currentTime / videoElement.duration;
-      wavesurfer.seekTo(progress);
-    } catch (error) {
-      console.warn("Failed to sync waveform:", error);
-    }
+    syncWaveformWithVideoRuntime({
+      wavesurfer,
+      videoDuration: videoElement?.duration ?? 0,
+      isWaveformLoaded,
+      currentTime: getPlaybackCurrentTime(),
+    });
   }
 
   // 销毁 WaveSurfer 实例
   function destroyWaveSurfer() {
-    if (wavesurfer) {
-      wavesurfer.destroy();
-      wavesurfer = null;
-      isWaveformLoaded = false;
+    const state = {
+      wavesurfer,
+      waveformRegions,
+      isWaveformLoaded,
+      isWaveformLoading,
+      waveformRenderFrame,
+    };
+    destroyWaveSurferRuntime(state);
+    wavesurfer = state.wavesurfer;
+    waveformRegions = state.waveformRegions;
+    isWaveformLoaded = state.isWaveformLoaded;
+    isWaveformLoading = state.isWaveformLoading;
+    waveformRenderFrame = state.waveformRenderFrame;
+    clipStartMarkerRegion = null;
+    clipSelectionRegions = {};
+  }
+
+  function createClipSelectionId() {
+    const nextId = createClipSelectionIdRuntime({
+      prefix: CLIP_SELECTION_REGION_ID_PREFIX,
+      counter: clipSelectionIdCounter,
+    });
+    clipSelectionIdCounter = nextId.nextCounter;
+    return nextId.id;
+  }
+
+  function syncClipWaveformRegionAppearance() {
+    clipSelections.forEach((selection) => {
+      const region = clipSelectionRegions[selection.id];
+      if (!region) {
+        return;
+      }
+
+      applyClipRegionLabel(region, selection.id === activeClipSelectionId);
+    });
+  }
+
+  function updateClipSelectionFromRegion(region: any) {
+    applyClipSelectionState(
+      updateClipSelectionFromRegionRuntime({
+        state: getClipSelectionState(),
+        region,
+      }),
+    );
+  }
+
+  function setActiveClipSelection(id: string | null) {
+    applyClipSelectionState(
+      setActiveClipSelectionRuntime({
+        state: getClipSelectionState(),
+        id,
+      }),
+    );
+    syncClipWaveformRegionAppearance();
+  }
+
+  function clearAllClipSelections() {
+    applyClipSelectionState(
+      clearAllClipSelectionsRuntime(getClipSelectionState()),
+    );
+    clipStartMarkerRegion = removeWaveformRegion(clipStartMarkerRegion);
+
+    Object.keys(clipSelectionRegions).forEach((id) => {
+      removeWaveformRegion(clipSelectionRegions[id]);
+    });
+
+    clipSelectionRegions = {};
+  }
+
+  function syncClipWaveformRegions() {
+    if (hasPendingClipStartMarker && !clipRegionColor) {
+      clipRegionColor = CLIP_REGION_COLOR;
     }
+
+    const result = syncClipWaveformRegionsRuntime({
+      waveformRegions,
+      isWaveformLoaded,
+      state: getClipSelectionState(),
+      clipStartMarkerRegion,
+      clipSelectionRegions,
+      clipStartMarkerRegionId: CLIP_START_MARKER_REGION_ID,
+    });
+    clipStartMarkerRegion = result.clipStartMarkerRegion;
+    clipSelectionRegions = result.clipSelectionRegions;
+  }
+
+  function clampTimelineScale(scale: number) {
+    return Math.max(1, Math.min(scale, maxTimelineScale));
+  }
+
+  function getTimelineMinVisibleSeconds() {
+    const duration = videoElement?.duration ?? 0;
+    if (duration <= 0) {
+      return 0;
+    }
+
+    return Math.min(duration / 10, 60);
+  }
+
+  function getTimelineSliderValueForScale(scale: number) {
+    const duration = videoElement?.duration ?? 0;
+    const minVisibleSeconds = getTimelineMinVisibleSeconds();
+
+    if (duration <= 0 || duration <= minVisibleSeconds) {
+      return 0;
+    }
+
+    const visibleSeconds = duration / clampTimelineScale(scale);
+    const clampedVisibleSeconds = Math.max(
+      minVisibleSeconds,
+      Math.min(duration, visibleSeconds),
+    );
+    const zoomProgress =
+      (duration - clampedVisibleSeconds) / (duration - minVisibleSeconds);
+
+    return zoomProgress * timelineZoomSteps;
+  }
+
+  function getTimelineSliderValue() {
+    return getTimelineSliderValueForScale(timelineScale);
+  }
+
+  function getTimelineScaleForSliderValue(sliderValue: number) {
+    const duration = videoElement?.duration ?? 0;
+    const minVisibleSeconds = getTimelineMinVisibleSeconds();
+
+    if (duration <= 0 || duration <= minVisibleSeconds) {
+      return 1;
+    }
+
+    const clampedSliderValue = Math.max(
+      0,
+      Math.min(timelineZoomSteps, sliderValue),
+    );
+    const zoomProgress = clampedSliderValue / timelineZoomSteps;
+    const visibleSeconds =
+      duration - zoomProgress * (duration - minVisibleSeconds);
+
+    return clampTimelineScale(duration / visibleSeconds);
+  }
+
+  function snapTimelineSliderValue(sliderValue: number) {
+    const clampedSliderValue = Math.max(
+      0,
+      Math.min(timelineZoomSteps, sliderValue),
+    );
+    let nearestValue = TIMELINE_ZOOM_NOTCH_VALUES[0] ?? clampedSliderValue;
+    let nearestDistance = Math.abs(clampedSliderValue - nearestValue);
+
+    for (const notchValue of TIMELINE_ZOOM_NOTCH_VALUES) {
+      const distance = Math.abs(clampedSliderValue - notchValue);
+      if (distance < nearestDistance) {
+        nearestValue = notchValue;
+        nearestDistance = distance;
+      }
+    }
+
+    return nearestValue;
+  }
+
+  function getNearestTimelineZoomNotchIndex(sliderValue: number) {
+    const clampedSliderValue = Math.max(
+      0,
+      Math.min(timelineZoomSteps, sliderValue),
+    );
+    let nearestIndex = 0;
+    let nearestDistance = Infinity;
+
+    for (let i = 0; i < TIMELINE_ZOOM_NOTCH_VALUES.length; i += 1) {
+      const notchValue = TIMELINE_ZOOM_NOTCH_VALUES[i];
+      const distance = Math.abs(clampedSliderValue - notchValue);
+      if (distance < nearestDistance) {
+        nearestIndex = i;
+        nearestDistance = distance;
+      }
+    }
+
+    return nearestIndex;
+  }
+
+  function getTimelineZoomNotchValue(index: number) {
+    const clampedIndex = Math.max(
+      0,
+      Math.min(TIMELINE_ZOOM_NOTCH_VALUES.length - 1, Math.round(index)),
+    );
+    return TIMELINE_ZOOM_NOTCH_VALUES[clampedIndex] ?? 0;
+  }
+
+  async function redrawWaveformAtCurrentWidth() {
+    await tick();
+    await redrawWaveformAtCurrentWidthRuntime({
+      showWaveform,
+      wavesurfer,
+      isWaveformLoaded,
+      waveformRenderFrame,
+      videoDuration: videoElement?.duration ?? 0,
+      renderWidth: waveformContainer?.clientWidth ?? 0,
+      currentTime,
+      syncWaveformWithVideo,
+      onFrameChange: (frame) => {
+        waveformRenderFrame = frame;
+      },
+    });
+  }
+
+  async function commitWaveformScale() {
+    waveformScale = clampTimelineScale(timelineScale);
+    await redrawWaveformAtCurrentWidth();
   }
 
   // on window close, save subtitles
   onMount(async () => {
-    if (TAURI_ENV) {
-      // 使用 Tauri 的全局事件监听器
-      try {
-        windowCloseUnlisten = await tauriListen(
-          "tauri://close-requested",
-          async () => {
-            await saveSubtitles();
-          }
-        );
-      } catch (error) {
-        log.warn("Failed to listen to window close event:", error);
-      }
-    } else {
-      // 在非 Tauri 环境中使用 beforeunload
-      window.addEventListener("beforeunload", async () => {
+    await setupClipWindowLifecycle({
+      state: clipWindowLifecycleState,
+      tauriEnv: TAURI_ENV,
+      loadDanmakuEmoteMap,
+      onDanmakuEmoteMapLoaded: (value) => {
+        danmakuEmoteMap = value as DanmakuEmoteMap;
+      },
+      logInfo: (message, payload) => {
+        void log.info(message, payload);
+      },
+      logWarn: (message, payload) => {
+        void log.warn(message, payload);
+      },
+      invoke,
+      onConfigLoaded: (value) => {
+        config = value as Config;
+        if (show && isVideoLoaded) {
+          void ensureMacOSNativePlayerMounted("config-loaded");
+        }
+      },
+      getIsVideoLoaded: () => isVideoLoaded,
+      prepareSeekbarThumbnails: () => {
+        void seekbarThumbnailRuntime.prepare();
+      },
+      detectMacOSNativePlayerSupport,
+      onMacOSNativePlayerSupportResolved: (available) => {
+        macOSNativePlayerAvailable = available;
+        if (available && show && isVideoLoaded) {
+          void ensureMacOSNativePlayerMounted("support-resolved");
+        }
+      },
+      shouldMountMacOSNativePlayer: () => shouldUseMacOSNativePlayer() && isVideoLoaded,
+      tick,
+      mountMacOSNativePlayer: async () => {
+        await macOSNativeClipPlayerRuntime.mount();
+      },
+      onCloseCleanup: async () => {
+        macOSNativeClipPlayerRuntime.stopBoundsFollowLoop();
+        macOSNativeClipPlayerRuntime.stopPolling();
+        isMacOSNativePlayerActive = false;
+        forceDomPreviewHidden = false;
+        macOSNativeClipPlayerRuntime.syncDomPreviewVisibility();
+        macOSNativeClipPlayerRuntime.restoreBackdrop();
+        await resetRightArrowFastForward(false, "close");
+        pausePrimaryPlayback();
+        isPlaying = false;
         await saveSubtitles();
-      });
-    }
-
-    // 初始化投稿相关数据
-    try {
-      // 获取配置
-      config = (await invoke("get_config")) as Config;
-
-      // 获取账号列表
-      const account_info: AccountInfo = await invoke("get_accounts");
-      accounts = account_info.accounts
-        .filter((a) => a.platform === "bilibili")
-        .map((a) => ({
-          value: a.uid,
-          name: a.name,
-          platform: a.platform,
-        }));
-    } catch (error) {
-      console.error("Failed to initialize upload data:", error);
-    }
+      },
+      updateVideoDisplayMetrics,
+      shouldSuppressClipWindowResizeRefresh,
+      getIsDocumentFullscreen: () => isDocumentFullscreen,
+      getIsWebFullscreen: () => isWebFullscreen,
+      requestFullscreenLayoutRefresh,
+      addWindowEventListener: (type, listener) => {
+        window.addEventListener(type, listener);
+      },
+      addDocumentEventListener: (type, listener) => {
+        document.addEventListener(type, listener);
+      },
+      handleViewportResize,
+      handleWindowFocus,
+      handleDocumentFullscreenChange,
+      syncClipWindowHeightAfterLayout,
+      saveSubtitles,
+      setAccounts: (value) => {
+        accounts = value;
+      },
+    });
   });
 
   onDestroy(() => {
-    // 清理窗口关闭事件监听器
-    if (windowCloseUnlisten) {
-      windowCloseUnlisten();
+    window.removeEventListener("resize", handleViewportResize);
+    window.removeEventListener("focus", handleWindowFocus);
+    document.removeEventListener(
+      "fullscreenchange",
+      handleDocumentFullscreenChange,
+    );
+    disposeClipWindowLifecycle(clipWindowLifecycleState);
+    playbackRateMenuController.close();
+    previewDisplayMenuController.close();
+    volumeMenuController.close();
+    danmuFontMenuController.close();
+    cancelClipWindowHeightSync();
+    cancelFullscreenExitFocusRestore();
+    clearVolumeClickAnimationTimer();
+    void resetRightArrowFastForward(false, "destroy");
+    macOSNativeClipPlayerRuntime.stopBoundsFollowLoop();
+    macOSNativeClipPlayerRuntime.stopPolling();
+    isMacOSNativePlayerActive = false;
+    forceDomPreviewHidden = false;
+    macOSNativeClipPlayerRuntime.restoreBackdrop();
+    macOSNativeClipPlayerRuntime.syncDomPreviewVisibility();
+    if (waveformRenderFrame !== null) {
+      cancelAnimationFrame(waveformRenderFrame);
+    }
+    cancelPreviewLayoutSync();
+    if (videoResizeObserver) {
+      videoResizeObserver.disconnect();
+      videoResizeObserver = null;
     }
     // 清理 WaveSurfer 实例
     destroyWaveSurfer();
+    clearActiveDanmus();
+    subtitleTimelineRuntime.cleanup();
+    seekbarInteractionRuntime.cleanup();
+    seekbarThumbnailRuntime.dispose();
+    timelineZoomRuntime.cleanup();
   });
 
-  function update_encode_prompt(content: string) {
-    const encode_prompt = document.getElementById("encode-prompt");
-    if (encode_prompt) {
-      encode_prompt.textContent = content;
+  function updateTaskPrompt(elementId: string, content: string) {
+    const element = document.getElementById(elementId);
+    if (element) {
+      element.textContent = content;
     }
+  }
+
+  function update_encode_prompt(content: string) {
+    updateTaskPrompt("encode-prompt", content);
   }
 
   function update_generate_prompt(content: string) {
-    const generate_prompt = document.getElementById("generate-prompt");
-    if (generate_prompt) {
-      generate_prompt.textContent = content;
-    }
+    updateTaskPrompt("generate-prompt", content);
   }
 
-  function update_post_prompt(str: string) {
-    const span = document.getElementById("post-prompt");
-    if (span) {
-      span.textContent = str;
-    }
+  function update_post_prompt(content: string) {
+    updateTaskPrompt("post-prompt", content);
   }
 
   // 投稿相关函数
@@ -345,40 +2579,39 @@
       return;
     }
 
-    let event_id = generateEventId();
-    current_post_event_id = event_id;
+    const eventId = generateEventId();
+    current_post_event_id = eventId;
+    update_post_prompt("投稿上传中");
 
-    update_post_prompt(`投稿上传中`);
-
-    const clear_update_listener = await listen(
-      `progress-update:${event_id}`,
-      (e) => {
-        update_post_prompt(e.payload.content);
-      }
+    const clearUpdateListener = await listen(
+      `progress-update:${eventId}`,
+      (event) => {
+        update_post_prompt(event.payload.content);
+      },
     );
-    const clear_finished_listener = await listen(
-      `progress-finished:${event_id}`,
-      (e) => {
-        update_post_prompt(`投稿`);
-        if (!e.payload.success) {
-          alert(e.payload.message);
+
+    const clearFinishedListener = await listen(
+      `progress-finished:${eventId}`,
+      (event) => {
+        update_post_prompt("投稿");
+        if (!event.payload.success) {
+          alert(event.payload.message);
         }
 
         current_post_event_id = null;
-
-        clear_update_listener();
-        clear_finished_listener();
-      }
+        clearUpdateListener();
+        clearFinishedListener();
+      },
     );
 
-    // update profile in local storage
-    window.localStorage.setItem("profile-" + roomId, JSON.stringify(profile));
+    window.localStorage.setItem(`profile-${roomId}`, JSON.stringify(profile));
+
     invoke("upload_procedure", {
       uid: uid_selected,
-      eventId: event_id,
-      roomId: roomId,
+      eventId,
+      roomId,
       videoId: video.id,
-      profile: profile,
+      profile,
     }).then(async () => {
       uid_selected = 0;
       await onVideoListUpdate?.();
@@ -389,208 +2622,299 @@
     if (!current_post_event_id) {
       return;
     }
-    invoke("cancel", { eventId: current_post_event_id });
+
+    await invoke("cancel", { eventId: current_post_event_id });
   }
 
-  function pauseVideo() {
-    if (videoElement) {
-      videoElement.pause();
-    }
-  }
-
-  // 监听当前字幕索引变化
-  $: if (currentSubtitleIndex >= 0 && subtitleElements[currentSubtitleIndex]) {
-    subtitleElements[currentSubtitleIndex].scrollIntoView({
-      behavior: "smooth",
-      block: "nearest",
+  async function saveSubtitles() {
+    await saveSubtitlesRuntime({
+      videoFile: video?.file,
+      videoId: video?.id,
+      subtitles,
+      invoke,
     });
   }
 
-  function parseSrtTime(time: string): number {
-    // hours:minutes:seconds,milliseconds
-    // Only replace the comma that separates seconds and milliseconds, not the arrow separator
-    const timeParts = time.split(",");
-    if (timeParts.length !== 2) {
-      console.warn("Invalid time format (missing comma):", time);
-      return 0;
+  async function generateSubtitles() {
+    subtitles = await generateSubtitlesRuntime({
+      videoFile: video?.file,
+      videoId: video?.id,
+      generateEventId,
+      listen,
+      invoke,
+      setCurrentGenerateEventId: (value) => {
+        current_generate_event_id = value;
+      },
+      updateGeneratePrompt: update_generate_prompt,
+      reportError: (message) => {
+        alert(message);
+      },
+    });
+  }
+
+  async function loadSubtitles() {
+    subtitles = await loadSubtitlesRuntime({
+      videoFile: video?.file,
+      videoId: video?.id,
+      invoke,
+    });
+  }
+
+  async function loadDanmu() {
+    danmuRecords = await loadDanmuRecords({
+      invoke,
+      videoId: video?.id,
+    });
+    resetDanmuPlayback();
+  }
+
+  async function loadBilibiliPbp() {
+    if (!video?.id) {
+      bilibiliPbpData = null;
+      return;
     }
 
-    const timeWithoutMs = timeParts[0];
-    const millisecondsStr = timeParts[1];
-
-    const parts = timeWithoutMs.split(":");
-    if (parts.length !== 3) {
-      console.warn("Invalid time format:", time);
-      return 0;
+    try {
+      bilibiliPbpData = await invoke<VideoPbpData | null>("get_video_pbp", {
+        id: video.id,
+      });
+    } catch (error) {
+      console.warn("Failed to load Bilibili PBP data:", error);
+      bilibiliPbpData = null;
     }
+  }
 
-    const [hours, minutes, seconds] = parts;
-    const hoursNum = parseInt(hours, 10);
-    const minutesNum = parseInt(minutes, 10);
-    const secondsNum = parseInt(seconds, 10);
-
-    // Pad milliseconds to 3 digits if needed
-    const millisecondsNum = parseInt(millisecondsStr.padEnd(3, "0"), 10);
-
-    if (
-      isNaN(hoursNum) ||
-      isNaN(minutesNum) ||
-      isNaN(secondsNum) ||
-      isNaN(millisecondsNum)
-    ) {
-      console.warn("Invalid time values:", time);
-      return 0;
-    }
-
-    return (
-      hoursNum * 3600 + minutesNum * 60 + secondsNum + millisecondsNum / 1000
+  function clearActiveDanmus() {
+    applyDanmuPlaybackState(
+      clearActiveDanmusState(getDanmuPlaybackState()),
+      "clear",
     );
   }
 
-  function formatSrtTime(time: number): string {
-    const hours = Math.floor(time / 3600);
-    const minutes = Math.floor((time % 3600) / 60);
-    const seconds = Math.floor(time % 60);
-    const milliseconds = Math.floor((time % 1) * 1000);
-    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")},${milliseconds.toString().padStart(3, "0")}`;
+  function removeActiveDanmu(id: number) {
+    activeDanmus = removeActiveDanmuById(activeDanmus, id);
   }
 
-  function srtToSubtitles(srt: string): Subtitle[] {
-    if (!srt.trim()) return [];
+  function setCurrentPlaybackRate(rate: number, refreshDanmu = true) {
+    const nextRate = Math.max(0.1, rate);
+    currentPlaybackRate = nextRate;
 
-    // Split by double newlines to separate subtitle blocks
-    const blocks = srt.split(/\n\s*\n/);
-
-    return blocks
-      .map((block) => {
-        // Split block into lines and filter out empty lines
-        const lines = block.split("\n").filter((line) => line.trim());
-
-        // Skip if block doesn't have enough lines
-        if (lines.length < 3) return null;
-
-        // Skip the first line (subtitle number)
-        const timeLine = lines[1];
-        const text = lines.slice(2).join("\n");
-
-        // Parse time line (format: "00:00:00,000 --> 00:00:00,000" or "00:00:00,000-->00:00:00,000")
-        const timeParts = timeLine.split(/\s*-->\s*/);
-        if (timeParts.length !== 2) {
-          console.warn("Invalid time line format:", timeLine);
-          return null;
-        }
-
-        const startTime = parseSrtTime(timeParts[0].trim());
-        const endTime = parseSrtTime(timeParts[1].trim());
-
-        if (isNaN(startTime) || isNaN(endTime)) {
-          console.warn("Failed to parse time values:", timeLine);
-          return null;
-        }
-
-        return {
-          startTime,
-          endTime,
-          text,
-        };
-      })
-      .filter((subtitle): subtitle is Subtitle => subtitle !== null)
-      .sort((a, b) => a.startTime - b.startTime);
-  }
-
-  function subtitlesToSrt(subtitles: Subtitle[]): string {
-    return subtitles
-      .map((subtitle, index) => {
-        return `${index + 1}\n${formatSrtTime(subtitle.startTime)} --> ${formatSrtTime(subtitle.endTime)}\n${subtitle.text}\n`;
-      })
-      .join("\n");
-  }
-
-  // 保存字幕到 localStorage
-  async function saveSubtitles() {
-    if (video?.file) {
-      try {
-        console.log("update video subtitle");
-        await invoke("update_video_subtitle", {
-          id: video.id,
-          subtitle: subtitlesToSrt(subtitles),
-        });
-      } catch (error) {
-        console.warn(error);
-      }
-    }
-  }
-
-  async function generateSubtitles() {
-    if (video?.file) {
-      current_generate_event_id = generateEventId();
-      const clear_update_listener = await listen(
-        `progress-update:${current_generate_event_id}`,
-        (e) => {
-          update_generate_prompt(e.payload.content);
-        }
+    if (usingMacOSNativePlayer()) {
+      void setMacOSNativePlayerRate(nextRate, MACOS_NATIVE_PLAYER_ID).catch(
+        (error) => {
+          console.warn("Failed to update macOS native playback rate:", error);
+        },
       );
-      const clear_finished_listener = await listen(
-        `progress-finished:${current_generate_event_id}`,
-        (e) => {
-          update_generate_prompt(`AI 生成字幕`);
-          if (!e.payload.success) {
-            alert("生成字幕失败: " + e.payload.message);
-          }
+    } else if (videoElement) {
+      videoElement.playbackRate = nextRate;
+    }
 
-          current_generate_event_id = null;
-
-          clear_update_listener();
-          clear_finished_listener();
-        }
-      );
-      const savedSubtitles = (await invoke("generate_video_subtitle", {
-        eventId: current_generate_event_id,
-        id: video.id,
-      })) as string;
-      subtitles = srtToSubtitles(savedSubtitles);
+    if (refreshDanmu && danmuEnabled) {
+      rebuildDanmuPlayback(Math.floor(getPlaybackCurrentTime() * 1000));
     }
   }
 
-  // 从 localStorage 加载字幕
-  async function loadSubtitles() {
-    if (video?.file) {
-      const savedSubtitles = (await invoke("get_video_subtitle", {
-        id: video.id,
-      })) as string;
-      if (savedSubtitles) {
-        subtitles = srtToSubtitles(savedSubtitles);
-      }
-    }
+  function resetDanmuPlayback(positionMs = 0) {
+    applyDanmuPlaybackState(
+      resetDanmuPlaybackState({
+        danmuRecords,
+        positionMs,
+        state: getDanmuPlaybackState(),
+      }),
+      "reset",
+    );
+  }
+
+  function rebuildDanmuPlayback(positionMs = 0) {
+    applyDanmuPlaybackState(
+      rebuildDanmuPlaybackState({
+        danmuRecords,
+        positionMs,
+        danmuActiveDurationMs,
+        renderDanmuEmotes,
+        danmakuEmoteMap,
+        layout: danmuLayoutConfig,
+        state: getDanmuPlaybackState(),
+      }),
+      "rebuild",
+    );
+  }
+
+  function syncDanmuPlayback(currentTimeMs: number) {
+    applyDanmuPlaybackState(
+      syncDanmuPlaybackState({
+        danmuRecords,
+        currentTimeMs,
+        danmuLookbackMs: DANMU_LOOKBACK_MS,
+        danmuActiveDurationMs,
+        renderDanmuEmotes,
+        danmakuEmoteMap,
+        layout: danmuLayoutConfig,
+        state: getDanmuPlaybackState(),
+        preserveActiveDanmus: isRightArrowFastForwardActive,
+      }),
+      "sync",
+    );
   }
 
   // 加载字幕样式
   function loadSubtitleStyle() {
     const savedStyle = localStorage.getItem(`subtitle_style_${roomId}`);
     if (savedStyle) {
-      subtitleStyle = JSON.parse(savedStyle);
+      subtitleStyle = { ...subtitleStyle, ...JSON.parse(savedStyle) };
     }
   }
 
-  $: if (show) {
-    isVideoLoaded = false;
-    subtitles = []; // 清空字幕列表
-    currentSubtitleIndex = -1;
-    subtitleElements = [];
-    loadSubtitleStyle(); // 加载字幕样式
+  function loadDanmakuStyleSettings() {
+    danmakuStyle = loadDanmakuStyle(roomId);
+  }
 
-    // 销毁旧的波形图实例
+  function getDanmuPlaybackState(): DanmuPlaybackState {
+    return {
+      activeDanmus,
+      recentDanmuPositions,
+      nextDanmuRenderId,
+      lastDanmuTimeMs,
+      nextDanmuIndex,
+    };
+  }
+
+  function applyDanmuPlaybackState(
+    state: DanmuPlaybackState,
+    _reason = "unknown",
+  ) {
+    activeDanmus = state.activeDanmus;
+    recentDanmuPositions = state.recentDanmuPositions;
+    nextDanmuRenderId = state.nextDanmuRenderId;
+    lastDanmuTimeMs = state.lastDanmuTimeMs;
+    nextDanmuIndex = state.nextDanmuIndex;
+  }
+
+  function syncPreviewState(time: number) {
+    currentTime = time;
+    currentSubtitleIndex = getCurrentSubtitleIndex();
+    currentSubtitle = subtitles[currentSubtitleIndex]?.text || "";
+
+    if (danmuEnabled) {
+      rebuildDanmuPlayback(Math.floor(time * 1000));
+    }
+
+    syncWaveformWithVideo();
+  }
+
+  function applyPlaybackProgress(
+    time: number,
+    syncWaveform = true,
+    syncDanmu = true,
+  ) {
+    const previousTime = currentTime;
+    currentTime = Math.max(0, time);
+    currentSubtitleIndex = getCurrentSubtitleIndex();
+    currentSubtitle = subtitles[currentSubtitleIndex]?.text || "";
+    const shouldSkipPausedDanmuDrift =
+      !isPlaying && Math.abs(currentTime - previousTime) <= 0.5;
+    if (syncDanmu && !shouldSkipPausedDanmuDrift) {
+      syncDanmuPlayback(Math.floor(currentTime * 1000));
+    }
+
+    if (syncWaveform) {
+      syncWaveformWithVideo();
+    }
+  }
+
+  async function setPreviewTime(time: number) {
+    if (!videoElement) {
+      return;
+    }
+
+    const duration = videoElement.duration || time;
+    const clampedTime = Math.max(0, Math.min(duration, time));
+
+    if (usingMacOSNativePlayer()) {
+      try {
+        await seekMacOSNativePlayer(clampedTime, MACOS_NATIVE_PLAYER_ID);
+      } catch (error) {
+        console.warn("Failed to seek macOS native player:", error);
+      }
+    } else {
+      videoElement.currentTime = clampedTime;
+    }
+
+    syncPreviewState(clampedTime);
+  }
+
+  function focusPreviewStage() {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const activeElement = document.activeElement as HTMLElement | null;
+    if (
+      activeElement &&
+      activeElement !== document.body &&
+      activeElement !== previewStageElement &&
+      isBlockedHotkeyTarget(activeElement)
+    ) {
+      activeElement.blur();
+    }
+
+    previewStageElement?.focus({ preventScroll: true });
+  }
+
+  function resetPreviewForOpenState() {
+    isVideoLoaded = false;
+    subtitles = [];
+    showSubtitleTimeline = false;
+    danmuRecords = [];
+    bilibiliPbpData = null;
+    clearActiveDanmus();
+    resetDanmuPlayback();
+    currentSubtitleIndex = -1;
+    loadSubtitleStyle();
+    loadDanmakuStyleSettings();
+    waveformDataPromise = null;
+    waveformDataVideoId = null;
+    if (rightArrowHoldTimeout !== null) {
+      clearTimeout(rightArrowHoldTimeout);
+      rightArrowHoldTimeout = null;
+    }
+    isRightArrowFastForwardActive = false;
+    currentPlaybackRate = getSelectedPlaybackRate();
+    resetSeekbarPreviewState(true);
+    if (usingMacOSNativePlayer()) {
+      pausePrimaryPlayback();
+    }
+    void macOSNativeClipPlayerRuntime.teardown();
     destroyWaveSurfer();
+  }
+
+  $: if (show) {
+    resetPreviewForOpenState();
+  }
+
+  $: if (video?.id && video.id !== lastDanmuVideoId) {
+    lastDanmuVideoId = video.id;
+    danmuRecords = [];
+    bilibiliPbpData = null;
+    resetDanmuPlayback();
+    waveformDataPromise = null;
+    waveformDataVideoId = null;
+  }
+
+  $: {
+    const nextVideoSource = video?.file ?? "";
+    if (nextVideoSource !== lastSeekbarThumbnailVideoSource) {
+      lastSeekbarThumbnailVideoSource = nextVideoSource;
+      resetSeekbarPreviewState(true);
+    }
   }
 
   // 当视频改变时重新初始化切片时间（只在视频ID改变时触发）
   $: if (video && videoElement?.duration && video.id !== lastVideoId) {
     lastVideoId = video.id;
-    // 切换视频时重置切片时间 - 不设置默认值，等待用户输入
-    clipStartTime = 0;
-    clipEndTime = 0;
+    loadPersistedClipSelections(video.id);
+    syncClipWaveformRegions();
     clipTitle = "";
-    clipTimesSet = false; // 重置标记，新视频默认透明
   }
 
   // 监听样式编辑器关闭，重新加载样式
@@ -600,25 +2924,49 @@
 
   async function handleVideoLoaded() {
     isVideoLoaded = true;
+    waveformScale = timelineScale;
+    currentPlaybackRate = getSelectedPlaybackRate();
+    isRightArrowFastForwardActive = false;
+
     if (videoElement) {
       videoElement.currentTime = 0;
       videoElement.pause();
-      videoElement.volume = volume;
+      videoElement.volume = getEffectiveVolume();
+      videoElement.playbackRate = getSelectedPlaybackRate();
       isPlaying = false;
       currentTime = 0;
       currentSubtitle = "";
       currentSubtitleIndex = -1;
-      // 获取视频实际尺寸
+      resetDanmuPlayback();
       videoWidth = videoElement.videoWidth;
       videoHeight = videoElement.videoHeight;
+      watchVideoDisplayMetrics();
     }
-    await loadSubtitles(); // 加载保存的字幕
-    initClipTimes(); // 初始化切片时间
 
-    // 初始化波形图
-    setTimeout(() => {
-      initWaveSurfer();
-    }, 100);
+    resetSeekbarPreviewState(false);
+    scheduleTimelineRefresh();
+    resetWaveformZoomInputTracking(getTimelineSliderValue());
+    await loadSubtitles();
+    showSubtitleTimeline = subtitles.length > 0;
+    syncClipWindowHeightAfterLayout(true);
+    scheduleTimelineRefresh();
+    void syncPreviewLayoutAfterUiChange();
+    await loadDanmu();
+    await loadBilibiliPbp();
+    await ensureMacOSNativePlayerMounted("video-loaded");
+    focusPreviewStage();
+
+    ensureWaveformData().catch((error) => {
+      console.warn("Failed to prepare waveform cache:", error);
+    });
+
+    if (showWaveform) {
+      setTimeout(() => {
+        void initWaveSurfer();
+      }, 100);
+    }
+
+    await seekbarThumbnailRuntime.prepare();
   }
 
   function updateTimeMarkers() {
@@ -627,165 +2975,196 @@
       return;
     }
 
-    const duration = videoElement.duration;
-    const minMarkerWidth = 100; // 最小标记宽度（像素）
-    const maxMarkers = Math.floor(timelineWidth / minMarkerWidth);
-    const interval = Math.ceil(duration / maxMarkers);
-
-    timeMarkers = Array.from(
-      { length: Math.min(Math.ceil(duration / interval) + 1, maxMarkers) },
-      (_, i) => Math.min(i * interval, duration)
+    timeMarkers = resolveTimelineMarkers(
+      videoElement.duration,
+      clampTimelineScale(timelineScale),
     );
   }
 
-  function formatTime(seconds: number): string {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes}:${remainingSeconds.toFixed(1).padStart(4, "0")}`;
+  function syncTimelineScrollMetrics() {
+    timelineZoomRuntime.syncTimelineScrollMetrics();
   }
 
-  // 切片功能相关函数
-  function initClipTimes() {
-    // 不做任何自动初始化，完全等待用户输入
-    // 只初始化标题
-    if (!clipTitle) {
-      clipTitle = "";
+  function handleTimelineScroll() {
+    timelineZoomRuntime.handleTimelineScroll();
+  }
+
+  function scheduleTimelineRefresh() {
+    timelineZoomRuntime.scheduleTimelineRefresh();
+  }
+
+  function resetWaveformZoomInputTracking(sliderValue: number | null = null) {
+    timelineZoomRuntime.resetWaveformZoomInputTracking(sliderValue);
+  }
+
+  $: {
+    const nextTarget = timelineContainer ?? null;
+    timelineZoomRuntime.syncGestureTarget("timeline", nextTarget);
+  }
+
+  $: {
+    const nextTarget = timelineZoomControlElement ?? null;
+    timelineZoomRuntime.syncGestureTarget("zoomControl", nextTarget);
+  }
+
+  $: {
+    const nextTarget = waveformGestureElement ?? null;
+    timelineZoomRuntime.syncGestureTarget("waveform", nextTarget);
+  }
+
+  function openTimeSeekInput() {
+    if (isTimeSeekEditing) {
+      return;
+    }
+
+    isTimeSeekEditing = true;
+    timeSeekValue = formatTimeForSeekInput(Math.max(0, currentTime));
+
+    void tick().then(() => {
+      timeSeekInput?.focus();
+      timeSeekInput?.select();
+    });
+  }
+
+  async function closeTimeSeekInput(applyValue: boolean) {
+    if (!isTimeSeekEditing) {
+      return;
+    }
+
+    if (applyValue) {
+      const parsed = parseTimeInput(timeSeekValue);
+      if (parsed !== null) {
+        const duration =
+          playbackDurationValue > 0
+            ? playbackDurationValue
+            : videoElement?.duration || parsed;
+        await setPreviewTime(Math.max(0, Math.min(duration, parsed)));
+      }
+    }
+
+    isTimeSeekEditing = false;
+  }
+
+  async function handleTimeSeekInputKeydown(event: KeyboardEvent) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      await closeTimeSeekInput(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      await closeTimeSeekInput(false);
     }
   }
 
+  function handleTimeSeekKeydown(event: KeyboardEvent) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      openTimeSeekInput();
+    }
+  }
+
+  // 切片功能相关函数
   function setClipStartTime() {
     if (videoElement) {
-      const newStartTime = videoElement.currentTime;
-
-      // 如果没有选区（首次设置起点），自动将终点设置为视频结尾
-      if (!clipTimesSet || clipEndTime === 0) {
-        clipStartTime = newStartTime;
-        clipEndTime = videoElement.duration; // 自动设置为视频结尾
-      }
-      // 如果新的开始时间在现有结束时间之后，自动设置终点为视频结尾
-      else if (clipTimesSet && clipEndTime > 0 && newStartTime >= clipEndTime) {
-        clipStartTime = newStartTime;
-        clipEndTime = videoElement.duration; // 自动设置为视频结尾
-      } else {
-        clipStartTime = newStartTime;
-      }
-
-      clipTimesSet = true; // 标记用户已设置切片时间
+      applyClipSelectionState(
+        setClipStartTimeRuntime({
+          state: getClipSelectionState(),
+          currentTime: getPlaybackCurrentTime(),
+          color: CLIP_REGION_COLOR,
+        }),
+      );
+      syncClipWaveformRegions();
     }
   }
 
   function setClipEndTime() {
     if (videoElement) {
-      const newEndTime = videoElement.currentTime;
+      const result = setClipEndTimeRuntime({
+        state: getClipSelectionState(),
+        currentTime: getPlaybackCurrentTime(),
+        nextId: createClipSelectionId(),
+        color: CLIP_REGION_COLOR,
+      });
+      applyClipSelectionState(result.state);
 
-      // 如果没有选区（首次设置终点），自动将起点设置为视频开头
-      if (!clipTimesSet || clipStartTime === 0) {
-        clipStartTime = 0; // 自动设置为视频开头
-        clipEndTime = newEndTime;
-      }
-      // 如果新的结束时间在现有开始时间之前，清空选区重新开始
-      else if (
-        clipTimesSet &&
-        clipStartTime > 0 &&
-        newEndTime <= clipStartTime
-      ) {
-        clipStartTime = 0; // 清空开始时间
-        clipEndTime = newEndTime;
-      } else {
-        clipEndTime = newEndTime;
-      }
-
-      clipTimesSet = true; // 标记用户已设置切片时间
+      syncClipWaveformRegions();
     }
   }
 
   function seekToClipStart() {
-    if (videoElement) {
-      videoElement.currentTime = clipStartTime;
+    if (videoElement && clipTimesSet) {
+      setPreviewTime(clipStartTime);
     }
   }
 
   function seekToClipEnd() {
-    if (videoElement) {
-      videoElement.currentTime = clipEndTime;
+    if (videoElement && clipTimesSet) {
+      setPreviewTime(clipEndTime);
     }
   }
 
   function clearClipSelection() {
-    clipStartTime = 0;
-    clipEndTime = 0;
-    clipTimesSet = false; // 重置标记，恢复透明状态
+    const hadPendingClipStartMarker = hasPendingClipStartMarker;
+    const activeSelectionId = activeClipSelectionId;
+    applyClipSelectionState(
+      clearClipSelectionState({
+        state: getClipSelectionState(),
+      }),
+    );
+    if (hadPendingClipStartMarker) {
+      clipStartMarkerRegion = removeWaveformRegion(clipStartMarkerRegion);
+    }
+    if (activeSelectionId) {
+      if (clipSelectionRegions[activeSelectionId]) {
+        removeWaveformRegion(clipSelectionRegions[activeSelectionId]);
+        delete clipSelectionRegions[activeSelectionId];
+      }
+      syncClipWaveformRegionAppearance();
+    }
   }
 
-  async function generateClip() {
-    if (!video) return;
-
-    // 如果没有设置切片标题，则以当前本地时间戳命名
-    if (!clipTitle.trim()) {
-      const now = new Date();
-      const pad = (n) => n.toString().padStart(2, "0");
-      const timestamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
-      clipTitle = `clip_${timestamp}`;
+  async function generateClip(options?: {
+    includeSubtitle?: boolean;
+    includeDanmu?: boolean;
+  }) {
+    const includeSubtitle = options?.includeSubtitle ?? false;
+    const includeDanmu = options?.includeDanmu ?? false;
+    if (includeSubtitle) {
+      await saveSubtitles();
     }
-
-    if (clipStartTime >= clipEndTime) {
-      alert("开始时间必须小于结束时间");
-      return;
-    }
-
-    if (clipEndTime - clipStartTime < 1) {
-      alert("切片长度不能少于1秒");
-      return;
-    }
-
-    clipping = true;
-    current_clip_event_id = generateEventId();
-    const clear_update_listener = await listen(
-      `progress-update:${current_clip_event_id}`,
-      (e) => {
-        update_clip_prompt(e.payload.content);
-      }
-    );
-    const clear_finished_listener = await listen(
-      `progress-finished:${current_clip_event_id}`,
-      (e) => {
-        update_clip_prompt(`生成切片`);
-        if (e.payload.success) {
-          // 切片生成成功，刷新视频列表
-          if (onVideoListUpdate) {
-            onVideoListUpdate();
-          }
-          // 重置切片设置
-          clipStartTime = 0;
-          clipEndTime = 0;
-          clipTitle = "";
-          clipTimesSet = false; // 重置标记
-        } else {
-          alert("切片生成失败: " + e.payload.message);
+    await generateClipRuntime({
+      video,
+      clipSelections,
+      clipExportSelectionIds,
+      mergeClipSelectionsOnExport,
+      clipTitle,
+      includeSubtitle,
+      includeDanmu,
+      renderDanmuEmotes,
+      danmuRenderOptions: buildDanmuRenderOptions(),
+      srtStyle: parseSubtitleStyle(subtitleStyle),
+      generateEventId,
+      listen,
+      invoke,
+      onPrompt: update_clip_prompt,
+      onClipTitleResolved: (value) => {
+        clipTitle = value;
+      },
+      onClippingChange: (value) => {
+        clipping = value;
+      },
+      onCurrentEventIdChange: (value) => {
+        current_clip_event_id = value;
+      },
+      onSuccess: () => {
+        if (onVideoListUpdate) {
+          onVideoListUpdate();
         }
-        clipping = false;
-
-        current_clip_event_id = null;
-
-        clear_update_listener();
-        clear_finished_listener();
-      }
-    );
-
-    try {
-      await invoke("clip_video", {
-        eventId: current_clip_event_id,
-        parentVideoId: video.id,
-        startTime: clipStartTime,
-        endTime: clipEndTime,
-        clipTitle: clipTitle,
-      });
-    } catch (error) {
-      console.error("切片失败:", error);
-      alert("切片失败: " + error);
-      clipping = false;
-      current_clip_event_id = null;
-    }
+        clipTitle = "";
+      },
+      reportError: (message) => {
+        alert(message);
+      },
+    });
   }
 
   function update_clip_prompt(text: string) {
@@ -795,414 +3174,246 @@
     }
   }
 
-  function canBeClipped(video: VideoItem): boolean {
-    if (!video) {
-      return false;
-    }
+  function buildDanmuRenderOptions(): DanmuRenderOptions {
+    return {
+      fontScale: danmakuStyle.fontScale,
+      opacity: danmakuStyle.opacity,
+      displayArea: danmakuStyle.displayArea,
+      speedPreset: danmakuStyle.speedPreset,
+      maxOnScreen: danmakuStyle.maxOnScreen,
+      bold: danmakuStyle.bold,
+      fontFamily: danmakuStyle.fontFamily,
+      preventSubtitleOcclusion: danmuPreventSubtitleOcclusionEnabled,
+    };
+  }
 
-    // 只要不是正在录制的视频(status !== -1)，都可以切片
-    // 这包括：
-    // - 导入的视频 (imported)
-    // - 所有平台的切片 (clip, bilibili_clip, douyin_clip等)
-    // - 录制完成的视频 (status === 0 或 status === 1)
-    return video.status !== -1;
+  function canBeClipped(video: VideoItem): boolean {
+    return canBeClippedRuntime(video);
+  }
+
+  function isBlockedHotkeyTarget(target: EventTarget | null): boolean {
+    return isBlockedHotkeyTargetRuntime(target);
+  }
+
+  async function resetRightArrowFastForward(
+    shouldSeekOnTap: boolean,
+    reason = "reset",
+  ) {
+    await playbackHotkeyRuntime.resetRightArrowFastForward(
+      shouldSeekOnTap,
+      reason,
+    );
   }
 
   // 键盘快捷键处理
   function handleKeydown(event: KeyboardEvent) {
-    if (!show || !isVideoLoaded) return;
+    playbackHotkeyRuntime.handleKeydown(event);
+  }
 
-    const target = event.target as HTMLElement | null;
-    const tagName = target?.tagName;
+  function handleKeyup(event: KeyboardEvent) {
+    playbackHotkeyRuntime.handleKeyup(event);
+  }
 
-    // 如果当前焦点位于可编辑元素内，则跳过快捷键处理
-    const isInInput =
-      (!!tagName && ["INPUT", "TEXTAREA", "SELECT"].includes(tagName)) ||
-      !!target?.isContentEditable ||
-      !!target?.closest(
-        "input, textarea, select, [contenteditable='true'], [data-hotkey-block]"
-      );
-
-    switch (event.key) {
-      case "【":
-      case "[":
-        if (!isInInput && canBeClipped(video)) {
-          event.preventDefault();
-          setClipStartTime();
-        }
-        break;
-      case "】":
-      case "]":
-        if (!isInInput && canBeClipped(video)) {
-          event.preventDefault();
-          setClipEndTime();
-        }
-        break;
-      case "q":
-      case "Q":
-        if (!isInInput && canBeClipped(video)) {
-          event.preventDefault();
-          seekToClipStart();
-        }
-        break;
-      case "e":
-      case "E":
-        if (!isInInput && canBeClipped(video)) {
-          event.preventDefault();
-          seekToClipEnd();
-        }
-        break;
-      case " ":
-        if (!isInInput) {
-          event.preventDefault();
-          togglePlay();
-        }
-        break;
-      case "ArrowLeft":
-        if (!isInInput) {
-          event.preventDefault();
-          if (videoElement) {
-            videoElement.currentTime = Math.max(
-              0,
-              videoElement.currentTime - 5
-            );
-          }
-        }
-        break;
-      case "ArrowRight":
-        if (!isInInput) {
-          event.preventDefault();
-          if (videoElement) {
-            videoElement.currentTime = Math.min(
-              videoElement.duration,
-              videoElement.currentTime + 5
-            );
-          }
-        }
-        break;
-      case "g":
-      case "G":
-        if (!isInInput && canBeClipped(video)) {
-          event.preventDefault();
-          generateClip();
-        }
-        break;
-      case "c":
-      case "C":
-        if (!isInInput && canBeClipped(video)) {
-          event.preventDefault();
-          clearClipSelection();
-        }
-        break;
-      case "h":
-      case "H":
-        if (!isInInput && canBeClipped(video)) {
-          event.preventDefault();
-          show_detail = !show_detail;
-        }
-        break;
+  function handleWindowBlur() {
+    videoSelectMenuController.close();
+    playbackRateMenuController.close();
+    previewDisplayMenuController.close();
+    danmuFontMenuController.close();
+    pbpMethodMenuController.close();
+    if (isRightArrowFastForwardActive || rightArrowHoldTimeout !== null) {
+      void resetRightArrowFastForward(false, "window-blur");
     }
+  }
+
+  function handleWindowClick(event: MouseEvent) {
+    const target = event.target as HTMLElement | null;
+    if (
+      isVideoSelectMenuVisible &&
+      (!target || !target.closest(".clip-video-select"))
+    ) {
+      videoSelectMenuController.close();
+    }
+    if (
+      isDanmuFontMenuVisible &&
+      (!target || !target.closest(".danmu-font-select"))
+    ) {
+      danmuFontMenuController.close();
+    }
+    if (
+      isPbpMethodMenuVisible &&
+      (!target || !target.closest(".pbp-method-select"))
+    ) {
+      pbpMethodMenuController.close();
+    }
+  }
+
+  function handleWindowFocus() {
+    if (!show || isDocumentFullscreen) {
+      return;
+    }
+    restorePreviewHotkeyFocusAfterFullscreenExit();
   }
 
   function togglePlay() {
-    if (isPlaying) {
-      videoElement.pause();
-    } else {
-      videoElement.play();
-    }
-    isPlaying = !isPlaying;
+    playbackHotkeyRuntime.togglePlay();
   }
 
   function handleTimeUpdate() {
-    currentTime = videoElement.currentTime;
-    // Find current subtitle
-    currentSubtitleIndex = getCurrentSubtitleIndex();
-    const currentSub = subtitles[currentSubtitleIndex];
-    currentSubtitle = currentSub?.text || "";
+    if (usingMacOSNativePlayer() || !videoElement) {
+      return;
+    }
 
-    // 同步波形图进度
-    syncWaveformWithVideo();
+    applyPlaybackProgress(videoElement.currentTime, !isRightArrowFastForwardActive);
   }
 
   function handleVideoEnded() {
-    isPlaying = false;
+    playbackHotkeyRuntime.handleVideoEnded();
   }
 
-  function handleTimelineClick(e: MouseEvent) {
+  function handleNativePlaybackEnded() {
+    playbackHotkeyRuntime.handleNativePlaybackEnded();
+  }
+
+  async function handleTimelineClick(e: MouseEvent) {
+    await resetRightArrowFastForward(false, "timeline-click");
     e.preventDefault();
     e.stopPropagation();
 
     // 如果正在拖动进度条，不处理点击事件
     if (isDraggingSeekbar) return;
 
-    if (!timelineElement || !videoElement) return;
-    const rect = timelineElement.getBoundingClientRect();
-    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    // 直接使用容器的实际宽度计算时间，与 getSubtitleStyle 逻辑保持一致
-    const time = (x / rect.width) * videoElement.duration;
-    videoElement.currentTime = time;
+    if (!videoElement) return;
+    const time = getTimelineTimeFromClientX(e.clientX, videoElement.duration);
+    setPreviewTime(time);
+  }
+
+  function getTimelineTimeFromClientX(clientX: number, duration: number) {
+    return subtitleTimelineRuntime.getTimelineTimeFromClientX(
+      clientX,
+      duration,
+    );
   }
 
   // 进度条拖动事件处理
-  function handleSeekbarMouseDown(e: MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-
-    if (!videoElement || !seekbarElement) return;
-
-    isDraggingSeekbar = true;
-    wasPlayingBeforeDrag = isPlaying;
-
-    // 先初始化预览时间为当前时间，避免跳跃
-    previewTime = videoElement.currentTime;
-
-    // 然后计算鼠标位置对应的时间
-    const rect = seekbarElement.getBoundingClientRect();
-    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    const newTime = (x / rect.width) * videoElement.duration;
-    previewTime = newTime;
-
-    // 暂停播放
-    if (isPlaying) {
-      videoElement.pause();
-      isPlaying = false;
-    }
-
-    // 添加全局事件监听器
-    document.addEventListener("mousemove", handleSeekbarMouseMove);
-    document.addEventListener("mouseup", handleSeekbarMouseUp);
+  async function handleSeekbarMouseDown(e: MouseEvent) {
+    await seekbarInteractionRuntime.handleSeekbarMouseDown(e);
   }
 
-  function handleSeekbarMouseMove(e: MouseEvent) {
-    if (!isDraggingSeekbar || !seekbarElement || !videoElement) return;
-
-    const rect = seekbarElement.getBoundingClientRect();
-    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-    const newTime = (x / rect.width) * videoElement.duration;
-    previewTime = newTime;
+  function handleSeekbarMouseEnter(e: MouseEvent) {
+    seekbarInteractionRuntime.handleSeekbarMouseEnter(e);
   }
 
-  function handleSeekbarMouseUp(e: MouseEvent) {
-    if (!isDraggingSeekbar) return;
+  function handleSeekbarMouseHoverMove(e: MouseEvent) {
+    seekbarInteractionRuntime.handleSeekbarMouseHoverMove(e);
+  }
 
-    // 应用最终时间
-    if (videoElement) {
-      videoElement.currentTime = previewTime;
-      // 立即同步currentTime变量，避免视觉偏移
-      currentTime = previewTime;
-    }
+  function handleSeekbarMouseLeave() {
+    seekbarInteractionRuntime.handleSeekbarMouseLeave();
+  }
 
-    isDraggingSeekbar = false;
-
-    // 移除全局事件监听器
-    document.removeEventListener("mousemove", handleSeekbarMouseMove);
-    document.removeEventListener("mouseup", handleSeekbarMouseUp);
-
-    // 恢复播放状态
-    if (wasPlayingBeforeDrag && videoElement) {
-      videoElement.play();
-      isPlaying = true;
-    }
+  function syncSeekbarHoverFromClientPoint(clientX: number, clientY: number) {
+    seekbarInteractionRuntime.syncSeekbarHoverFromClientPoint(clientX, clientY);
   }
 
   function addSubtitle() {
-    const newStartTime = currentTime;
-    const newEndTime = Math.min(currentTime + 5, videoElement.duration);
-    subtitles = [
-      ...subtitles,
-      {
-        startTime: newStartTime,
-        endTime: newEndTime,
-        text: "",
-      },
-    ];
-    subtitles.sort((a, b) => a.startTime - b.startTime);
+    const hadNoSubtitles = subtitles.length === 0;
+    const duration = videoElement?.duration ?? 0;
+    subtitles = createSubtitleAtTime({
+      subtitles,
+      currentTime,
+      duration,
+    });
+    if (hadNoSubtitles) {
+      showSubtitleTimeline = true;
+      scheduleTimelineRefresh();
+      void syncPreviewLayoutAfterUiChange();
+    }
   }
 
   function updateSubtitleTime(index: number, isStart: boolean, time: number) {
-    if (!videoElement?.duration) return; // 防御性检查
-
-    subtitles = subtitles.map((sub, i) => {
-      if (i !== index) return sub;
-
-      if (isStart) {
-        // 开始时间约束：不能小于0，不能大于结束时间-0.1秒
-        const newStartTime = Math.max(0, Math.min(time, sub.endTime - 0.1));
-        return { ...sub, startTime: newStartTime };
-      } else {
-        // 结束时间约束：不能小于开始时间+0.1秒，不能大于视频总长度
-        const newEndTime = Math.min(
-          videoElement.duration,
-          Math.max(time, sub.startTime + 0.1)
-        );
-        return { ...sub, endTime: newEndTime };
-      }
+    if (!videoElement?.duration) return;
+    subtitles = updateSubtitleTimeRuntime({
+      subtitles,
+      index,
+      isStart,
+      time,
+      duration: videoElement.duration,
     });
-    subtitles = subtitles.sort((a, b) => a.startTime - b.startTime);
   }
 
   function moveSubtitle(index: number, newStartTime: number) {
     if (!videoElement?.duration) return;
-
-    const sub = subtitles[index];
-    const duration = sub.endTime - sub.startTime;
-
-    // 约束开始时间到有效范围 [0, videoDuration - duration]
-    const finalStartTime = Math.max(
-      0,
-      Math.min(newStartTime, videoElement.duration - duration)
-    );
-    const finalEndTime = finalStartTime + duration;
-
-    subtitles = subtitles.map((s, i) =>
-      i === index
-        ? { ...s, startTime: finalStartTime, endTime: finalEndTime }
-        : s
-    );
-    subtitles = subtitles.sort((a, b) => a.startTime - b.startTime);
+    subtitles = moveSubtitleRuntime({
+      subtitles,
+      index,
+      newStartTime,
+      duration: videoElement.duration,
+    });
   }
 
   async function removeSubtitle(index: number) {
-    subtitles = subtitles.filter((_, i) => i !== index);
+    subtitles = removeSubtitleRuntime(subtitles, index);
     await saveSubtitles(); // 删除字幕时保存
   }
 
   async function clearSubtitles() {
-    subtitles = [];
+    subtitles = clearSubtitlesRuntime();
     await saveSubtitles(); // 清空字幕时保存
   }
 
   function seekToTime(time: number) {
-    videoElement.currentTime = time;
+    setPreviewTime(time);
   }
 
   function adjustTime(index: number, isStart: boolean, delta: number) {
-    const sub = subtitles[index];
-    if (isStart) {
-      const newTime = Math.max(0, sub.startTime + delta);
-      if (newTime < sub.endTime - 0.1) {
-        subtitles = subtitles.map((s, i) =>
-          i === index ? { ...s, startTime: newTime } : s
-        );
-        subtitles = subtitles.sort((a, b) => a.startTime - b.startTime);
-      }
-    } else {
-      const newTime = Math.min(videoElement.duration, sub.endTime + delta);
-      if (newTime > sub.startTime + 0.1) {
-        subtitles = subtitles.map((s, i) =>
-          i === index ? { ...s, endTime: newTime } : s
-        );
-        subtitles = subtitles.sort((a, b) => a.startTime - b.startTime);
-      }
+    if (!videoElement?.duration) {
+      return;
     }
+    subtitles = adjustSubtitleTimeRuntime({
+      subtitles,
+      index,
+      isStart,
+      delta,
+      duration: videoElement.duration,
+    });
   }
 
   function handleTimelineMouseDown(
     e: MouseEvent,
     index: number,
-    isStart: boolean
+    isStart: boolean,
   ) {
-    startEdgeDragging(index, isStart);
-  }
-
-  // 辅助函数：统一开始边缘拖拽
-  function startEdgeDragging(index: number, isStart: boolean) {
-    draggingSubtitle = { index, isStart };
-    document.addEventListener("mousemove", handleTimelineMouseMove);
-    document.addEventListener("mouseup", handleTimelineMouseUp);
-  }
-
-  // 辅助函数：统一开始块拖拽
-  function startBlockDragging(
-    index: number,
-    mouseTime: number,
-    startTime: number
-  ) {
-    draggingBlock = index;
-    dragOffset = mouseTime - startTime;
-    document.addEventListener("mousemove", handleBlockMouseMove);
-    document.addEventListener("mouseup", handleBlockMouseUp);
+    subtitleTimelineRuntime.handleTimelineMouseDown(e, index, isStart);
   }
 
   function handleBlockMouseDown(e: MouseEvent, index: number) {
-    const sub = subtitles[index];
-    const rect = timelineElement.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const mouseTime = (x / rect.width) * videoElement.duration;
-
-    // 计算边缘检测参数
-    const blockWidth =
-      rect.width * ((sub.endTime - sub.startTime) / videoElement.duration);
-    const relativeX = x - rect.width * (sub.startTime / videoElement.duration);
-    const edgeSize = Math.min(5, Math.max(2, blockWidth / 3));
-
-    // 确定拖拽类型
-    if (relativeX < edgeSize) {
-      // 左边缘：调整开始时间
-      startEdgeDragging(index, true);
-    } else if (blockWidth > edgeSize * 2 && relativeX > blockWidth - edgeSize) {
-      // 右边缘：调整结束时间（仅当有足够空间时）
-      startEdgeDragging(index, false);
-    } else if (blockWidth <= edgeSize * 2 && relativeX > edgeSize) {
-      // 短字幕右侧：调整结束时间
-      startEdgeDragging(index, false);
-    } else {
-      // 中间区域：移动整个字幕
-      startBlockDragging(index, mouseTime, sub.startTime);
-    }
-  }
-
-  function handleTimelineMouseMove(e: MouseEvent) {
-    if (!draggingSubtitle || !timelineElement) return;
-
-    const rect = timelineElement.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    // 直接使用容器的实际宽度计算时间，与 getSubtitleStyle 逻辑保持一致
-    const time = (x / rect.width) * videoElement.duration;
-
-    updateSubtitleTime(draggingSubtitle.index, draggingSubtitle.isStart, time);
-  }
-
-  function handleBlockMouseMove(e: MouseEvent) {
-    if (draggingBlock === null || !timelineElement) return;
-
-    const rect = timelineElement.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    // 直接使用容器的实际宽度计算时间，与 getSubtitleStyle 逻辑保持一致
-    const mouseTime = (x / rect.width) * videoElement.duration;
-    const newStartTime = mouseTime - dragOffset; // 使用偏移量计算新的开始时间
-
-    moveSubtitle(draggingBlock, newStartTime);
-  }
-
-  function handleTimelineMouseUp() {
-    draggingSubtitle = null;
-    document.removeEventListener("mousemove", handleTimelineMouseMove);
-    document.removeEventListener("mouseup", handleTimelineMouseUp);
-  }
-
-  function handleBlockMouseUp() {
-    draggingBlock = null;
-    document.removeEventListener("mousemove", handleBlockMouseMove);
-    document.removeEventListener("mouseup", handleBlockMouseUp);
+    subtitleTimelineRuntime.handleBlockMouseDown(e, index);
   }
 
   function getSubtitleStyle(subtitle: Subtitle) {
-    if (!isVideoLoaded || !videoElement?.duration) return "";
-    // 字幕块位置应该是相对于时间轴容器的百分比，不需要乘以缩放因子
-    // 因为容器本身已经通过 style="width: {100 * timelineScale}%" 进行了缩放
-    const start = (subtitle.startTime / videoElement.duration) * 100;
-    const width =
-      ((subtitle.endTime - subtitle.startTime) / videoElement.duration) * 100;
-    return `left: ${start}%; width: ${width}%;`;
+    return getSubtitleStyleRuntime({
+      subtitle,
+      isVideoLoaded,
+      duration: videoElement?.duration ?? 0,
+    });
   }
 
   function handleVolumeChange(e: Event) {
     const input = e.target as HTMLInputElement;
-    volume = parseFloat(input.value);
-    if (videoElement) {
-      videoElement.volume = volume;
+    const nextVolume = Math.max(0, Math.min(1, parseFloat(input.value)));
+    if (!Number.isFinite(nextVolume)) {
+      return;
     }
+
+    volume = nextVolume;
+    if (nextVolume > 0) {
+      previousVolume = nextVolume;
+      isMuted = false;
+    } else {
+      isMuted = true;
+    }
+
+    applyVolumeToPlayback();
   }
 
   function handleCoverError(event: Event) {
@@ -1211,96 +3422,316 @@
   }
 
   function toggleMute() {
-    if (videoElement) {
-      if (isMuted) {
-        videoElement.volume = previousVolume;
-      } else {
-        previousVolume = videoElement.volume;
-        videoElement.volume = 0;
-      }
-      isMuted = !isMuted;
+    if (isMuted || getEffectiveVolume() === 0) {
+      volume = Math.max(0.05, previousVolume || 1);
+      isMuted = false;
+    } else {
+      previousVolume = Math.max(volume, 0.05);
+      isMuted = true;
     }
+
+    const nextMuted = isMuted || volume === 0;
+    triggerVolumeClickAnimation(nextMuted);
+    if (isVolumeHover) {
+      isVolumeHoverSuppressed = true;
+    }
+
+    applyVolumeToPlayback();
   }
 
   function getCurrentSubtitleIndex(): number {
     return subtitles.findIndex(
-      (sub) => currentTime >= sub.startTime && currentTime < sub.endTime
+      (sub) => currentTime >= sub.startTime && currentTime < sub.endTime,
     );
   }
 
-  function handleScaleChange(e: Event) {
-    const input = e.target as HTMLInputElement;
-    timelineScale = parseFloat(input.value);
-    const rect = timelineElement.getBoundingClientRect();
-    timelineWidth = rect.width;
-    updateTimeMarkers();
+  function handleScaleChange() {
+    timelineZoomRuntime.handleScaleChange();
+  }
 
-    // 同步调整 waveform 容器宽度
-    if (waveformContainer) {
-      waveformContainer.style.width = `${100 * timelineScale}%`;
-    }
+  function handleScaleCommit() {
+    timelineZoomRuntime.handleScaleCommit();
+  }
+
+  function applyTimelinePanelLayoutChange(
+    reason: string,
+    targetHeight: number,
+    options: {
+      applyStateChange?: () => void | Promise<void>;
+      applyStateBeforeResize?: boolean;
+      prepareLayoutReserve?: () => void | Promise<void>;
+      cleanupLayoutReserve?: () => void | Promise<void>;
+    } = {},
+  ) {
+    void applyTimelinePanelLayoutChangeRuntime({
+      reason,
+      targetHeight,
+      applyStateBeforeResize: options.applyStateBeforeResize,
+      applyStateChange: options.applyStateChange,
+      prepareLayoutReserve: options.prepareLayoutReserve,
+      cleanupLayoutReserve: options.cleanupLayoutReserve,
+      isPreviewDisplayMenuVisible,
+      setHidePreviewDisplayMenuDuringPanelTransition: (value) => {
+        hidePreviewDisplayMenuDuringPanelTransition = value;
+      },
+      getHidePreviewDisplayMenuDuringPanelTransition: () =>
+        hidePreviewDisplayMenuDuringPanelTransition,
+      setPreviewDisplayMenuInteractionLocked,
+      setPreviewOverlayLayersSuppressed,
+      setPreviewDisplayMetricsFrozen,
+      suppressClipWindowResizeRefresh,
+      resizeRefreshSuppressMs: CLIP_WINDOW_RESIZE_REFRESH_SUPPRESS_MS,
+      lockPreviewStageHeightForPanelTransition,
+      unlockPreviewStageHeightForPanelTransition,
+      tick,
+      syncClipWindowHeight,
+      updateVideoDisplayMetrics,
+      usingMacOSNativePlayer: usingMacOSNativePlayer(),
+      syncMacOSNativePlayerBounds: (force, syncReason) =>
+        macOSNativeClipPlayerRuntime.syncBounds(force, syncReason),
+      tauriEnv: TAURI_ENV,
+      waitForWindowBoundsStable,
+      syncPreviewLayoutAfterUiChange,
+      resumeMacOSNativePlayerBoundsSync,
+    });
+  }
+
+  function toggleSubtitleTimeline() {
+    const nextShowSubtitleTimeline = !showSubtitleTimeline;
+    const nextShowSubtitleTimelineEffective =
+      nextShowSubtitleTimeline && subtitles.length > 0;
+    const nextTargetHeight = getAdaptiveClipWindowHeightForState(
+      nextShowSubtitleTimelineEffective,
+      showWaveform,
+    );
+    const isExpanding =
+      !showSubtitleTimelineEffective && nextShowSubtitleTimelineEffective;
+    suspendMacOSNativePlayerBoundsSync("toggle-subtitle");
+    applyTimelinePanelLayoutChange("toggle-subtitle", nextTargetHeight, {
+      applyStateBeforeResize: !isExpanding,
+      prepareLayoutReserve: isExpanding
+        ? () => {
+            reserveSubtitleTimelineLayoutDuringResize = true;
+            scheduleTimelineRefresh();
+          }
+        : undefined,
+      cleanupLayoutReserve: isExpanding
+        ? () => {
+            reserveSubtitleTimelineLayoutDuringResize = false;
+            scheduleTimelineRefresh();
+          }
+        : undefined,
+      applyStateChange: () => {
+        showSubtitleTimeline = nextShowSubtitleTimeline;
+        scheduleTimelineRefresh();
+      },
+    });
+  }
+
+  function toggleWaveform() {
+    const nextShowWaveform = !showWaveform;
+    const nextTargetHeight = getAdaptiveClipWindowHeightForState(
+      showSubtitleTimelineEffective,
+      nextShowWaveform,
+    );
+    const isExpanding = !showWaveform && nextShowWaveform;
+    suspendMacOSNativePlayerBoundsSync("toggle-waveform");
+    applyTimelinePanelLayoutChange("toggle-waveform", nextTargetHeight, {
+      applyStateBeforeResize: !isExpanding,
+      prepareLayoutReserve: isExpanding
+        ? () => {
+            reserveWaveformLayoutDuringResize = true;
+            scheduleTimelineRefresh();
+          }
+        : undefined,
+      cleanupLayoutReserve: isExpanding
+        ? () => {
+            reserveWaveformLayoutDuringResize = false;
+            scheduleTimelineRefresh();
+          }
+        : undefined,
+      applyStateChange: async () => {
+        showWaveform = nextShowWaveform;
+        scheduleTimelineRefresh();
+
+        if (!showWaveform) {
+          return;
+        }
+
+        waveformScale = timelineScale;
+        await tick();
+        if (!wavesurfer) {
+          requestAnimationFrame(() => {
+            initWaveSurfer();
+            void syncPreviewLayoutAfterUiChange();
+          });
+          return;
+        }
+
+        void redrawWaveformAtCurrentWidth().finally(() => {
+          void syncPreviewLayoutAfterUiChange();
+        });
+        syncClipWaveformRegions();
+      },
+    });
+  }
+
+  function handleTimelineZoomControlWheel(e: WheelEvent) {
+    timelineZoomRuntime.handleTimelineZoomControlWheel(e);
   }
 
   function handleWheel(e: WheelEvent) {
-    e.preventDefault();
-    if (timelineContainer) {
-      timelineContainer.scrollLeft += e.deltaY;
+    timelineZoomRuntime.handleWheel(e);
+  }
+
+  async function encodeVideoMedia(options: {
+    includeSubtitle: boolean;
+    includeDanmu: boolean;
+  }) {
+    if (!video?.id) {
+      return;
+    }
+    if (!options.includeSubtitle && !options.includeDanmu) {
+      alert("请至少选择字幕或弹幕");
+      return;
+    }
+
+    if (options.includeSubtitle) {
+      await saveSubtitles();
+    }
+    const eventId = generateEventId();
+    current_encode_event_id = eventId;
+    let taskSettled = false;
+    let clearUpdateListener: (() => void) | undefined;
+    let clearFinishedListener: (() => void) | undefined;
+
+    function finishEncodeTask() {
+      update_encode_prompt("压制");
+      current_encode_event_id = null;
+      clearUpdateListener?.();
+      clearFinishedListener?.();
+    }
+
+    try {
+      clearUpdateListener = await listen(
+        `progress-update:${eventId}`,
+        (event) => {
+          update_encode_prompt(event.payload.content);
+        },
+      );
+
+      clearFinishedListener = await listen(
+        `progress-finished:${eventId}`,
+        (event) => {
+          if (taskSettled) {
+            return;
+          }
+          taskSettled = true;
+          if (!event.payload.success) {
+            alert(`压制失败: ${event.payload.message}`);
+          }
+
+          finishEncodeTask();
+        },
+      );
+
+      await invoke("encode_video_media", {
+        eventId,
+        id: video.id,
+        includeSubtitle: options.includeSubtitle,
+        includeDanmu: options.includeDanmu,
+        renderDanmuEmotes,
+        danmuRenderOptions: buildDanmuRenderOptions(),
+        srtStyle: parseSubtitleStyle(subtitleStyle),
+      });
+
+      await onVideoListUpdate?.();
+    } catch (error) {
+      if (taskSettled) {
+        return;
+      }
+      taskSettled = true;
+      alert(`压制失败: ${error}`);
+      finishEncodeTask();
     }
   }
 
-  async function encodeVideoSubtitle() {
-    await saveSubtitles();
-    const event_id = generateEventId();
-    current_encode_event_id = event_id;
-    const clear_update_listener = await listen(
-      `progress-update:${event_id}`,
-      (e) => {
-        update_encode_prompt(e.payload.content);
-      }
-    );
-    const clear_finished_listener = await listen(
-      `progress-finished:${event_id}`,
-      (e) => {
-        update_encode_prompt(`压制字幕`);
-        if (!e.payload.success) {
-          alert("压制失败: " + e.payload.message);
-        }
-
-        current_encode_event_id = null;
-
-        clear_update_listener();
-        clear_finished_listener();
-      }
-    );
-    const result = await invoke("encode_video_subtitle", {
-      eventId: event_id,
-      id: video.id,
-      srtStyle: parseSubtitleStyle(subtitleStyle),
-    });
-    console.log(result);
-    // 压制成功后更新视频列表
-    await onVideoListUpdate?.();
-  }
-
-  function handleVideoSelect(e: Event) {
-    const selectedVideo = videos.find(
-      (v) => v.id === Number((e.target as HTMLSelectElement).value)
-    );
+  function selectVideo(selectedVideo: VideoItem | undefined) {
     if (selectedVideo) {
       // 清空字幕列表
       subtitles = [];
       currentSubtitleIndex = -1;
       currentSubtitle = "";
       // 重置视频状态
+      if (usingMacOSNativePlayer()) {
+        pausePrimaryPlayback();
+        void macOSNativeClipPlayerRuntime.teardown();
+      }
       if (videoElement) {
         videoElement.currentTime = 0;
-        videoElement.pause();
+        pausePrimaryPlayback();
         isPlaying = false;
         currentTime = 0;
       }
       // 调用父组件的回调
       onVideoChange?.(selectedVideo);
     }
+  }
+
+  function toggleVideoMenu() {
+    if (isVideoSelectMenuVisible) {
+      videoSelectMenuController.close();
+    } else {
+      videoSelectMenuController.open();
+    }
+  }
+
+  async function deleteCurrentVideo() {
+    if (!video) {
+      return;
+    }
+
+    try {
+      await invoke("delete_video", { id: video.id });
+      await onVideoListUpdate?.();
+      if (videos.length > 0) {
+        onVideoChange?.(videos[0]);
+      } else {
+        close_window();
+      }
+    } catch (error) {
+      console.error(error);
+      alert("删除失败：" + error);
+    }
+  }
+
+  function openEncodeModal() {
+    showEncodeModal = true;
+  }
+
+  function confirmEncodeModal() {
+    showEncodeModal = false;
+    encodeVideoMedia({
+      includeSubtitle: encodeIncludeSubtitle,
+      includeDanmu: encodeIncludeDanmu,
+    });
+  }
+
+  function openClipGenerateModal() {
+    showClipGenerateModal = true;
+  }
+
+  function confirmClipGenerateModal() {
+    showClipGenerateModal = false;
+    generateClip({
+      includeSubtitle: clipIncludeSubtitle,
+      includeDanmu: clipIncludeDanmu,
+    });
+  }
+
+  function getVideoSelectLabel() {
+    const matchedVideo = videos.find((item) => item.id === video?.id);
+    return matchedVideo?.name || video?.title || video?.file || "选择视频";
   }
 
   async function saveVideo() {
@@ -1316,200 +3747,122 @@
 
 {#if show}
   <div
-    class="fixed inset-0 bg-[#1c1c1e] z-[1000] transition-opacity duration-200"
+    class="fixed inset-0 z-[1000] flex flex-col transition-opacity duration-200"
+    class:clip-web-fullscreen={isWebFullscreen}
+    style:background={showMacOSNativePlayerUnderlayValue ? "transparent" : "#1c1c1e"}
     class:opacity-0={!show}
     class:opacity-100={show}
   >
-    <!-- 顶部导航栏 -->
-    <div
-      class="h-14 border-b border-gray-800/50 bg-[#2c2c2e] flex items-center px-4 justify-between"
-    >
-      <div class="flex items-center space-x-4">
-        <!-- 视频选择器 -->
-        <div class="relative flex items-center space-x-2">
-          <select
-            class="bg-[#1c1c1e] text-gray-300 text-sm rounded-md px-3 py-1.5 border border-gray-700 focus:border-[#0A84FF] outline-none appearance-none cursor-pointer hover:bg-[#2c2c2e] transition-colors duration-200"
-            value={video.id}
-            on:change={handleVideoSelect}
-          >
-            {#each videos as v}
-              <option value={v.id}>{v.name}</option>
-            {/each}
-          </select>
-          <!-- 保存按钮 -->
-          {#if !TAURI_ENV}
-            <button
-              class="text-blue-500 hover:text-blue-400 transition-colors duration-200 px-2 py-1.5 rounded-md hover:bg-blue-500/10"
-              on:click={saveVideo}
-            >
-              <Download class="w-4 h-4" />
-            </button>
-          {/if}
-          <!-- 删除按钮 -->
-          <button
-            class="text-red-500 hover:text-red-400 transition-colors duration-200 px-2 py-1.5 rounded-md hover:bg-red-500/10"
-            on:click={async () => {
-              if (!video) return;
-              try {
-                await invoke("delete_video", { id: video.id });
-                // 更新视频列表
-                await onVideoListUpdate?.();
-                // 如果列表不为空，选择新的视频
-                if (videos.length > 0) {
-                  const newVideo = videos[0];
-                  onVideoChange?.(newVideo);
-                } else {
-                  // 如果列表为空，关闭窗口
-                  close_window();
-                }
-              } catch (error) {
-                console.error(error);
-                alert("删除失败：" + error);
-              }
-            }}
-          >
-            <Trash2 class="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      <div class="flex items-center space-x-2">
-        {#if canBeClipped(video)}
-          <button
-            class="px-4 py-1.5 text-sm bg-green-600 text-white rounded-md hover:bg-green-600/90 transition-colors duration-200 border border-gray-600/50 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            on:click={generateClip}
-            disabled={clipping || current_clip_event_id != null}
-          >
-            {#if clipping || current_clip_event_id != null}
-              <svg
-                class="animate-spin h-4 w-4"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  class="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  stroke-width="4"
-                ></circle>
-                <path
-                  class="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                ></path>
-              </svg>
-            {:else}
-              <Scissors class="w-4 h-4" />
-            {/if}
-            <span id="generate-clip-prompt"
-              >{clipping ? "生成中..." : "生成切片"}</span
-            >
-          </button>
-        {/if}
-        <button
-          class="px-4 py-1.5 text-sm bg-[#0A84FF] text-white rounded-md hover:bg-[#0A84FF]/90 transition-colors duration-200 border border-gray-600/50 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          on:click={() => (showEncodeModal = true)}
-          disabled={current_encode_event_id != null}
-        >
-          {#if current_encode_event_id != null}
-            <svg
-              class="animate-spin h-4 w-4"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                class="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                stroke-width="4"
-              ></circle>
-              <path
-                class="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 714 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
-          {:else}
-            <Film class="w-4 h-4" />
-          {/if}
-          <span id="encode-prompt">压制字幕</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- 编码确认 Modal -->
-    {#if showEncodeModal}
+    {#if shouldRenderMacOSNativePlayerPresentationValue}
       <div
-        class="fixed inset-0 bg-black/50 z-[1100] flex items-center justify-center"
+        class="pointer-events-none fixed -left-[200vw] -top-[200vh] h-px w-px overflow-hidden opacity-0"
+        aria-hidden="true"
       >
-        <div class="bg-[#2c2c2e] rounded-lg shadow-xl w-[480px] max-w-[90vw]">
-          <!-- Modal 头部 -->
-          <div
-            class="px-4 py-3 border-b border-gray-800/50 flex items-center justify-between"
-          >
-            <h3 class="text-sm font-medium text-gray-200">确认压制</h3>
-            <button
-              class="text-gray-400 hover:text-white transition-colors duration-200"
-              on:click={() => (showEncodeModal = false)}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="h-4 w-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-            </button>
-          </div>
-
-          <!-- Modal 内容 -->
-          <div class="p-4 text-gray-300">
-            压制需要耗费一定的时间，请耐心等待；压制完成后，切片列表中会出现新的带有字幕的切片。确定要进行压制吗？
-          </div>
-
-          <!-- Modal 底部按钮 -->
-          <div
-            class="px-4 py-3 border-t border-gray-800/50 flex justify-end space-x-2"
-          >
-            <button
-              class="px-4 py-1.5 text-sm bg-gray-700/50 text-gray-200 rounded-md hover:bg-gray-700/70 transition-colors duration-200 border border-gray-600/50"
-              on:click={() => (showEncodeModal = false)}
-            >
-              取消
-            </button>
-            <button
-              class="px-4 py-1.5 text-sm bg-[#0A84FF] text-white rounded-md hover:bg-[#0A84FF]/90 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-1"
-              on:click={() => {
-                showEncodeModal = false;
-                encodeVideoSubtitle();
-              }}
-            >
-              <span>确认</span>
-            </button>
-          </div>
-        </div>
+        <!-- svelte-ignore a11y-media-has-caption -->
+        <video
+          bind:this={videoElement}
+          src={video?.file}
+          class="block h-px w-px"
+          playsinline
+          on:timeupdate={handleTimeUpdate}
+          on:ended={handleVideoEnded}
+          on:loadedmetadata={handleVideoLoaded}
+          on:click={togglePlay}
+        />
       </div>
     {/if}
 
-    <div class="flex h-[calc(100vh-3.5rem)]">
+    <VideoPreviewLetterboxMask
+      visible={showMacOSNativePlayerUnderlayValue}
+      top={previewStageViewportTop}
+      left={previewStageViewportLeft}
+      width={previewStageViewportWidth}
+      height={previewStageViewportHeight}
+    />
+
+    {#if showMacOSNativePlayerUnderlayValue && previewVideoFrameWidth > 0 && previewVideoFrameHeight > 0}
+      {#if danmuEnabled && activeDanmus.length > 0}
+        <div
+          class="pointer-events-none absolute z-[12] overflow-hidden clip-preview-stable-overlay"
+          style={stablePreviewVideoFrameStyle}
+        >
+          <VideoPreviewDanmuOverlay
+            {activeDanmus}
+            {isPlaying}
+            animationRate={danmuAnimationRate}
+            playbackTimeMs={currentTime * 1000}
+            {videoDanmuFontSize}
+            {videoDanmuFontFamily}
+            {videoDanmuFontWeight}
+            {videoDanmuLineHeight}
+            {videoDanmuEmoteScale}
+            {videoDanmuEmoteOffset}
+            {videoDanmuOpacity}
+            {videoDanmuTextShadow}
+            {getVideoDanmuEmoteStyle}
+            onRemoveActiveDanmu={removeActiveDanmu}
+          />
+        </div>
+      {/if}
+
+      {#if canBeClipped(video) && !suppressPreviewOverlayLayersValue}
+        <VideoPreviewHotkeyOverlay
+          showDetail={show_detail}
+          style={`${getStablePreviewStageOverlayStyle()}background-color: rgba(0, 0, 0, 0.5); color: white; font-size: 0.8em;`}
+        />
+      {/if}
+    {/if}
+
+    <VideoPreviewTopBar
+      {video}
+      {videos}
+      videoSelectLabel={getVideoSelectLabel()}
+      {isVideoSelectMenuVisible}
+      {videoSelectMenuController}
+      onToggleVideoMenu={toggleVideoMenu}
+      onSelectVideo={selectVideo}
+      onDeleteVideo={deleteCurrentVideo}
+      showDownloadButton={!TAURI_ENV}
+      onDownloadVideo={saveVideo}
+      canClip={canBeClipped(video)}
+      {clipping}
+      currentClipEventId={current_clip_event_id}
+      onGenerateClip={openClipGenerateModal}
+      currentEncodeEventId={current_encode_event_id}
+      onOpenEncodeModal={openEncodeModal}
+    />
+
+    <VideoPreviewEncodeModal
+      bind:show={showClipGenerateModal}
+      title="生成切片"
+      description="选择需要烧录进切片画面的内容；不选择时只生成普通切片。"
+      confirmLabel="生成"
+      requireSelection={false}
+      bind:includeSubtitle={clipIncludeSubtitle}
+      bind:includeDanmu={clipIncludeDanmu}
+      onCancel={() => (showClipGenerateModal = false)}
+      onConfirm={confirmClipGenerateModal}
+    />
+
+    <VideoPreviewEncodeModal
+      bind:show={showEncodeModal}
+      title="压制"
+      description="选择需要烧录进当前视频画面的内容。"
+      confirmLabel="压制"
+      requireSelection={true}
+      bind:includeSubtitle={encodeIncludeSubtitle}
+      bind:includeDanmu={encodeIncludeDanmu}
+      onCancel={() => (showEncodeModal = false)}
+      onConfirm={confirmEncodeModal}
+    />
+
+    <div class="clip-main relative z-10 flex flex-1 min-h-0 overflow-hidden">
       <!-- 视频区域 -->
-      <div class="flex-1 flex flex-col">
+      <div class="flex-1 min-w-0 min-h-0 flex flex-col overflow-hidden">
         <!-- 切片控制信息条 -->
         {#if canBeClipped(video)}
           <div
-            class="bg-black px-4 py-2 flex items-center justify-between text-sm"
+            class="bg-black px-4 py-2 flex items-center gap-6 text-sm flex-wrap"
           >
             <div class="flex items-center space-x-6">
               <div class="text-gray-300">
@@ -1531,727 +3884,324 @@
           </div>
         {/if}
         <!-- 视频容器 -->
-        <div class="flex-1 bg-black relative">
-          <div class="absolute inset-0 flex items-center">
-            <!-- svelte-ignore a11y-media-has-caption -->
-            <video
-              bind:this={videoElement}
-              src={video?.file}
-              class="w-full h-auto max-h-full cursor-pointer"
-              on:timeupdate={handleTimeUpdate}
-              on:ended={handleVideoEnded}
-              on:loadedmetadata={handleVideoLoaded}
+        <div
+          bind:this={previewStageElement}
+          class="flex-1 min-h-0 relative overflow-hidden outline-none"
+          style:flex={previewStageHeightLockPx !== null
+            ? "0 0 auto"
+            : undefined}
+          style:height={previewStageHeightLockPx !== null
+            ? `${previewStageHeightLockPx}px`
+            : undefined}
+          style:min-height={previewStageHeightLockPx !== null
+            ? `${previewStageHeightLockPx}px`
+            : undefined}
+          style:background={showMacOSNativePlayerUnderlayValue
+            ? "transparent"
+            : "black"}
+          tabindex="-1"
+        >
+          <div
+            class="absolute inset-0 z-0 bg-black transition-opacity duration-75"
+            style:opacity={showMacOSNativePlayerUnderlayValue ? 0 : 1}
+          >
+            <div
+              bind:this={macOSNativePlayerSlotElement}
+              class="absolute outline-none"
+              class:pointer-events-none={!usingMacOSNativePlayerValue}
+              style={shouldRenderMacOSNativePlayerPresentationValue &&
+              previewVideoFrameWidth > 0 &&
+              previewVideoFrameHeight > 0
+                ? `top:${previewVideoFrameTop}px;left:${previewVideoFrameLeft}px;width:${previewVideoFrameWidth}px;height:${previewVideoFrameHeight}px;`
+                : "inset: 0;"}
+              role="button"
+              aria-label="Toggle preview playback"
+              tabindex={usingMacOSNativePlayerValue ? 0 : -1}
               on:click={togglePlay}
-            />
-
-            <!-- 切片快捷键说明 -->
-            {#if canBeClipped(video)}
-              <div
-                id="overlay"
-                class="absolute top-2 left-2 rounded-md px-2 py-2 flex flex-col pointer-events-none"
-                style="background-color: rgba(0, 0, 0, 0.5); color: white; font-size: 0.8em;"
-              >
-                <p style="margin: 0;">
-                  快捷键说明
-                  <kbd
-                    style="border: 1px solid white; padding: 0 0.2em; border-radius: 0.2em; margin: 4px;"
-                    >h</kbd
-                  >展开
-                </p>
-                {#if show_detail}
-                  <span>
-                    <p style="margin: 0;">
-                      <kbd
-                        style="border: 1px solid white; padding: 0 0.2em; border-radius: 0.2em; margin: 4px;"
-                        >[</kbd
-                      >设定选区开始
-                    </p>
-                    <p style="margin: 0;">
-                      <kbd
-                        style="border: 1px solid white; padding: 0 0.2em; border-radius: 0.2em; margin: 4px;"
-                        >]</kbd
-                      >设定选区结束
-                    </p>
-                    <p style="margin: 0;">
-                      <kbd
-                        style="border: 1px solid white; padding: 0 0.2em; border-radius: 0.2em; margin: 4px;"
-                        >q</kbd
-                      >跳转到选区开始
-                    </p>
-                    <p style="margin: 0;">
-                      <kbd
-                        style="border: 1px solid white; padding: 0 0.2em; border-radius: 0.2em; margin: 4px;"
-                        >e</kbd
-                      >跳转到选区结束
-                    </p>
-                    <p style="margin: 0;">
-                      <kbd
-                        style="border: 1px solid white; padding: 0 0.2em; border-radius: 0.2em; margin: 4px;"
-                        >g</kbd
-                      >生成切片
-                    </p>
-                    <p style="margin: 0;">
-                      <kbd
-                        style="border: 1px solid white; padding: 0 0.2em; border-radius: 0.2em; margin: 4px;"
-                        >c</kbd
-                      >清除选区
-                    </p>
-                    <p style="margin: 0;">
-                      <kbd
-                        style="border: 1px solid white; padding: 0 0.2em; border-radius: 0.2em; margin: 4px;"
-                        >Space</kbd
-                      >播放/暂停
-                    </p>
-                    <p style="margin: 0;">
-                      <kbd
-                        style="border: 1px solid white; padding: 0 0.2em; border-radius: 0.2em; margin: 4px;"
-                        >←</kbd
-                      ><kbd
-                        style="border: 1px solid white; padding: 0 0.2em; border-radius: 0.2em; margin: 4px;"
-                        >→</kbd
-                      >前进/后退
-                    </p>
-                  </span>
-                {/if}
-              </div>
-            {/if}
-            <!-- 字幕显示 -->
-            {#if currentSubtitle}
-              <div
-                class="absolute bottom-8 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-white"
-                style="
-                  font-family: {subtitleStyle.fontName};
-                  font-size: {videoHeight * (subtitleStyle.fontSize / 720)}px;
-                  color: {subtitleStyle.fontColor};
-                  text-shadow: {`
-                    ${subtitleStyle.outlineWidth}px ${subtitleStyle.outlineWidth}px 0 ${subtitleStyle.outlineColor},
-                    -${subtitleStyle.outlineWidth}px ${subtitleStyle.outlineWidth}px 0 ${subtitleStyle.outlineColor},
-                    ${subtitleStyle.outlineWidth}px -${subtitleStyle.outlineWidth}px 0 ${subtitleStyle.outlineColor},
-                    -${subtitleStyle.outlineWidth}px -${subtitleStyle.outlineWidth}px 0 ${subtitleStyle.outlineColor}
-                  `};
-                  text-align: {subtitleStyle.alignment === 1
-                  ? 'left'
-                  : subtitleStyle.alignment === 2
-                    ? 'center'
-                    : 'right'};
-                  margin-bottom: {videoHeight *
-                  (subtitleStyle.marginV / 720)}px;
-                "
-              >
-                {currentSubtitle}
-              </div>
-            {/if}
-          </div>
-        </div>
-
-        <!-- 字幕控制栏 -->
-        <div class="bg-[#1c1c1e] border-t border-gray-800/50 p-2">
-          <div
-            class="h-8 px-4 flex items-center justify-between border-b border-gray-800/50"
-          >
-            <!-- 左侧控制 -->
-            <div class="flex items-center space-x-2">
-              <!-- 缩放控制 -->
-              <span class="text-xs text-gray-400">缩放</span>
-              <input
-                type="range"
-                min="1"
-                max="10"
-                step="0.1"
-                value={timelineScale}
-                on:input={handleScaleChange}
-                class="w-32 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer"
-              />
-            </div>
-
-            <!-- 中间播放控制 -->
-            <div class="flex-1 flex justify-center">
-              <button
-                class="p-1.5 rounded-lg bg-[#2c2c2e] hover:bg-[#3c3c3e] transition-colors duration-200"
-                on:click={togglePlay}
-              >
-                {#if isPlaying}
-                  <Pause class="w-4 h-4 text-white" />
-                {:else}
-                  <Play class="w-4 h-4 text-white" />
-                {/if}
-              </button>
-            </div>
-
-            <!-- 音量控制 -->
-            <div class="flex items-center space-x-2">
-              <button
-                class="text-white hover:text-gray-300 transition-colors duration-200"
-                on:click={toggleMute}
-              >
-                {#if isMuted || volume === 0}
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    class="h-4 w-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <path d="M11 5L6 9H2v6h4l5 4V5z" />
-                    <line x1="23" y1="9" x2="17" y2="15" />
-                    <line x1="17" y1="9" x2="23" y2="15" />
-                  </svg>
-                {:else if volume < 0.5}
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    class="h-4 w-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <path d="M11 5L6 9H2v6h4l5 4V5z" />
-                  </svg>
-                {:else}
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    class="h-4 w-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  >
-                    <path d="M11 5L6 9H2v6h4l5 4V5z" />
-                  </svg>
-                {/if}
-              </button>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.1"
-                bind:value={volume}
-                on:input={handleVolumeChange}
-                class="w-20 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer"
-              />
-            </div>
-          </div>
-        </div>
-
-        <!-- 时间轴容器（包含波形图和字幕时间轴） -->
-        <div class="bg-[#1c1c1e] border-t border-gray-800/50">
-          <div
-            class="h-48 overflow-x-auto overflow-y-hidden sidebar-scrollbar"
-            bind:this={timelineContainer}
-            on:wheel|preventDefault={handleWheel}
-          >
-            {#if isWaveformLoading}
-              <div
-                class="flex items-center justify-center gap-2 text-gray-400 w-full h-full text-center"
-              >
-                <svg
-                  class="animate-spin h-4 w-4"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    class="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    stroke-width="4"
-                  ></circle>
-                  <path
-                    class="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                <span class="text-sm">加载音频波形...</span>
-              </div>
-            {/if}
-            <div
-              bind:this={waveformContainer}
-              class="w-full h-full waveform-container"
-              style="min-height: 60px; width: 100%; height: 60px;"
-              data-waveform-container
-            ></div>
-
-            <!-- 字幕时间轴 -->
-            <!-- svelte-ignore a11y-click-events-have-key-events -->
-            <div
-              bind:this={timelineElement}
-              class="relative h-32 group"
-              style="width: {100 * timelineScale}%"
-              on:mousemove={(e) => {
-                if (!timelineElement) return;
-                const rect = timelineElement.getBoundingClientRect();
-                timelineWidth = rect.width;
-                updateTimeMarkers();
-              }}
-              on:click|preventDefault|stopPropagation={(e) => {
-                // 只有在不拖动进度条时才处理时间轴点击
-                if (!isDraggingSeekbar) {
-                  handleTimelineClick(e);
+              on:keydown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  togglePlay();
                 }
               }}
-            >
-              <!-- 切片选区可视化 -->
-              {#if canBeClipped(video) && clipTimesSet}
+            />
+
+            {#if !shouldRenderMacOSNativePlayerPresentationValue}
+              <!-- svelte-ignore a11y-media-has-caption -->
+              <video
+                bind:this={videoElement}
+                src={video?.file}
+                class={shouldHideDomPreview()
+                  ? "hidden"
+                  : "absolute inset-x-0 bottom-0 w-full h-auto max-h-full cursor-pointer transition-opacity duration-75"}
+                playsinline
+                on:timeupdate={handleTimeUpdate}
+                on:ended={handleVideoEnded}
+                on:loadedmetadata={handleVideoLoaded}
+                on:click={togglePlay}
+              />
+            {/if}
+          </div>
+
+          <VideoPreviewLetterboxMask
+            visible={showMacOSNativePlayerUnderlayValue}
+            top={previewVideoFrameTop}
+            left={previewVideoFrameLeft}
+            width={previewVideoFrameWidth}
+            height={previewVideoFrameHeight}
+            zIndex={1}
+          />
+
+          {#if !suppressPreviewOverlayLayersValue}
+            <div class="pointer-events-none absolute inset-0 z-10">
+              {#if showFastForwardOverlayValue}
                 <div
-                  class="absolute top-0 left-0 right-0 h-1 group-hover:h-1.5 transition-all duration-200 z-15"
+                  class="three-playrate-hint"
+                  style:top={`${threePlayrateHintTopValue}px`}
                 >
-                  <!-- 切片选中区域 -->
-                  <div
-                    class="absolute h-full bg-green-400/80 transition-all duration-200"
-                    style="left: {(clipStartTime /
-                      (videoElement?.duration || 1)) *
-                      100}%; right: {100 -
-                      (clipEndTime / (videoElement?.duration || 1)) * 100}%"
-                  ></div>
-                  <!-- 切片起点标记 -->
-                  <div
-                    class="absolute h-full w-0.5 bg-green-500 transition-all duration-200"
-                    style="left: {(clipStartTime /
-                      (videoElement?.duration || 1)) *
-                      100}%"
-                  ></div>
-                  <!-- 切片终点标记 -->
-                  <div
-                    class="absolute h-full w-0.5 bg-green-500 transition-all duration-200"
-                    style="left: {(clipEndTime /
-                      (videoElement?.duration || 1)) *
-                      100}%; transform: translateX(-100%)"
-                  ></div>
+                  <span class="three-playrate-hint-icon">
+                    <LottieIcon
+                      animationData={skipLottieData}
+                      autoplay={true}
+                      loop={true}
+                      className="lottie-icon lottie-icon--hint"
+                    />
+                  </span>
+                  <span class="three-playrate-hint-text">倍速播放中</span>
                 </div>
               {/if}
-              <!-- 播放进度条容器 (借鉴Shaka Player样式) -->
-              <div
-                bind:this={seekbarElement}
-                class="shaka-seek-bar-container absolute top-2 left-0 right-0 h-1 group-hover:h-1.5 bg-white/30 rounded-full cursor-pointer transition-all duration-200 z-10"
-                class:dragging={isDraggingSeekbar}
-                on:mousedown={handleSeekbarMouseDown}
-              >
-                <!-- 播放进度条 -->
-                <div
-                  class="h-full bg-[#0A84FF] rounded-full pointer-events-none transition-all duration-200"
-                  class:no-transition={isDraggingSeekbar}
-                  style="width: {((isDraggingSeekbar
-                    ? previewTime
-                    : currentTime) /
-                    (videoElement?.duration || 1)) *
-                    100}%"
-                ></div>
 
-                <!-- 播放进度条滑块 (hover或拖动时显示) -->
+              {#if !showMacOSNativePlayerUnderlayValue && danmuEnabled && activeDanmus.length > 0}
                 <div
-                  class="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full border-2 border-[#0A84FF] shadow-lg z-30 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                  class:opacity-100={isDraggingSeekbar}
-                  style="left: calc({((isDraggingSeekbar
-                    ? previewTime
-                    : currentTime) /
-                    (videoElement?.duration || 1)) *
-                    100}% - 6px)"
-                ></div>
-              </div>
-
-              <!-- 时间刻度 -->
-              {#each timeMarkers as time}
-                <div
-                  class="absolute top-2 bottom-0 border-l border-gray-700"
-                  style="left: {(time / (videoElement?.duration || 1)) * 100}%"
+                  class="absolute inset-0 pointer-events-none overflow-hidden z-15"
                 >
-                  <div
-                    class="absolute top-2 left-1/2 -translate-x-1/2 text-xs text-gray-400 whitespace-nowrap"
-                  >
-                    {formatTime(time)}
-                  </div>
+                  <VideoPreviewDanmuOverlay
+                    {activeDanmus}
+                    {isPlaying}
+                    animationRate={danmuAnimationRate}
+                    playbackTimeMs={currentTime * 1000}
+                    {videoDanmuFontSize}
+                    {videoDanmuFontFamily}
+                    {videoDanmuFontWeight}
+                    {videoDanmuLineHeight}
+                    {videoDanmuEmoteScale}
+                    {videoDanmuEmoteOffset}
+                    {videoDanmuOpacity}
+                    {videoDanmuTextShadow}
+                    {getVideoDanmuEmoteStyle}
+                    onRemoveActiveDanmu={removeActiveDanmu}
+                  />
                 </div>
-              {/each}
+              {/if}
 
-              <!-- 字幕块 -->
-              {#each subtitles as subtitle, index}
-                <div
-                  bind:this={subtitleElements[index]}
-                  class="absolute top-6 bottom-6 bg-[#0A84FF]/30 rounded-lg cursor-move"
-                  style={getSubtitleStyle(subtitle)}
-                  on:mousedown={(e) => handleBlockMouseDown(e, index)}
-                >
-                  <!-- 开始时间手柄 -->
-                  <div
-                    class="absolute left-0 top-0 bottom-0 w-1 bg-[#0A84FF] rounded-l cursor-ew-resize"
-                    on:mousedown|stopPropagation={(e) =>
-                      handleTimelineMouseDown(e, index, true)}
-                  />
-                  <!-- 结束时间手柄 -->
-                  <div
-                    class="absolute right-0 top-0 bottom-0 w-1 bg-[#0A84FF] rounded-r cursor-ew-resize"
-                    on:mousedown|stopPropagation={(e) =>
-                      handleTimelineMouseDown(e, index, false)}
-                  />
-                  <!-- 字幕文本预览 -->
-                  <div
-                    class="absolute inset-x-2 inset-y-1 flex items-center justify-center text-xs text-white text-center line-clamp-3 rounded"
-                  >
-                    {subtitle.text || "空字幕"}
-                  </div>
-                </div>
-              {/each}
+              {#if !showMacOSNativePlayerUnderlayValue && canBeClipped(video)}
+                <VideoPreviewHotkeyOverlay
+                  showDetail={show_detail}
+                  style="top: 0.5rem; left: 0.5rem; background-color: rgba(0, 0, 0, 0.5); color: white; font-size: 0.8em;"
+                />
+              {/if}
+              <!-- 字幕显示 -->
+              <VideoPreviewSubtitleOverlay
+                {currentSubtitle}
+                {subtitleStyle}
+                {previewDisplayHeight}
+                {previewScaleBaseHeight}
+              />
             </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 字幕编辑面板 -->
-      <div
-        class="w-80 border-l border-gray-800/50 bg-[#2c2c2e] overflow-y-auto sidebar-scrollbar"
-      >
-        <!-- Tab 导航 -->
-        <div class="flex border-b border-gray-800/50 bg-[#1c1c1e]">
-          <button
-            class="px-6 py-3 text-sm font-medium transition-all duration-200 relative"
-            class:text-white={activeTab === "subtitle"}
-            class:text-gray-400={activeTab !== "subtitle"}
-            class:bg-[#2c2c2e]={activeTab === "subtitle"}
-            class:bg-transparent={activeTab !== "subtitle"}
-            on:click={() => (activeTab = "subtitle")}
-          >
-            字幕
-            {#if activeTab === "subtitle"}
-              <div
-                class="absolute bottom-0 left-0 right-0 h-0.5 bg-[#0A84FF]"
-              ></div>
-            {/if}
-          </button>
-
-          <button
-            class="px-6 py-3 text-sm font-medium transition-all duration-200 relative"
-            class:text-white={activeTab === "upload"}
-            class:text-gray-400={activeTab !== "upload"}
-            class:bg-[#2c2c2e]={activeTab === "upload"}
-            class:bg-transparent={activeTab !== "upload"}
-            on:click={() => (activeTab = "upload")}
-          >
-            快速投稿
-            {#if activeTab === "upload"}
-              <div
-                class="absolute bottom-0 left-0 right-0 h-0.5 bg-[#0A84FF]"
-              ></div>
-            {/if}
-          </button>
+          {/if}
         </div>
 
-        <!-- Tab 内容 -->
-        {#if activeTab === "subtitle"}
-          <!-- 字幕 Tab 内容 -->
-          <div class="p-4 space-y-4">
-            <div class="w-full sticky top-0 bg-[#2c2c2e] z-10 pb-4">
-              <div class="flex flex-col space-y-2">
-                <div class="flex space-x-2">
-                  <button
-                    class="flex-1 px-3 py-1.5 text-sm bg-[#1c1c1e] text-gray-300 rounded-lg hover:bg-[#2c2c2e] transition-colors duration-200 flex items-center justify-center space-x-1 border border-gray-700"
-                    on:click={() => (showStyleEditor = true)}
-                  >
-                    <Settings class="w-4 h-4" />
-                    <span>字幕样式</span>
-                  </button>
-                  <button
-                    class="flex-1 px-3 py-1.5 text-sm bg-[#1c1c1e] text-gray-300 rounded-lg hover:bg-[#2c2c2e] transition-colors duration-200 flex items-center justify-center space-x-1 border border-gray-700"
-                    on:click={clearSubtitles}
-                  >
-                    <Eraser class="w-4 h-4" />
-                    <span>清空列表</span>
-                  </button>
-                </div>
-                <div class="flex space-x-2">
-                  <button
-                    class="flex-1 px-3 py-1.5 text-sm bg-[#1c1c1e] text-gray-300 rounded-lg hover:bg-[#2c2c2e] transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-1 border border-gray-700"
-                    on:click={generateSubtitles}
-                    disabled={current_generate_event_id !== null}
-                  >
-                    {#if current_generate_event_id !== null}
-                      <svg
-                        class="animate-spin h-4 w-4"
-                        xmlns="http://www.w3.org/2000/svg"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                      >
-                        <circle
-                          class="opacity-25"
-                          cx="12"
-                          cy="12"
-                          r="10"
-                          stroke="currentColor"
-                          stroke-width="4"
-                        ></circle>
-                        <path
-                          class="opacity-75"
-                          fill="currentColor"
-                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                        ></path>
-                      </svg>
-                    {:else}
-                      <BrainCircuit class="w-4 h-4" />
-                    {/if}
-                    <span id="generate-prompt">AI 生成字幕</span>
-                  </button>
-                  <button
-                    class="flex-1 px-3 py-1.5 text-sm bg-[#1c1c1e] text-gray-300 rounded-lg hover:bg-[#2c2c2e] transition-colors duration-200 flex items-center justify-center space-x-1 border border-gray-700"
-                    on:click={addSubtitle}
-                  >
-                    <Plus class="w-4 h-4" />
-                    <span>手动添加</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <!-- 字幕列表 -->
-            <div class="space-y-2">
-              {#each subtitles as subtitle, index}
-                <div
-                  bind:this={subtitleElements[index]}
-                  class="p-3 bg-[#1c1c1e] rounded-lg space-y-2 transition-colors duration-200"
-                  class:bg-[#2c2c2e]={currentSubtitleIndex === index}
-                  class:border={currentSubtitleIndex === index}
-                  class:border-[#0A84FF]={currentSubtitleIndex === index}
-                >
-                  <div class="flex justify-between items-center">
-                    <div class="flex items-center space-x-4">
-                      <div class="flex items-center space-x-1">
-                        <button
-                          class="text-sm text-[#0A84FF] hover:text-[#0A84FF]/80"
-                          on:click={() => seekToTime(subtitle.startTime)}
-                        >
-                          {formatTime(subtitle.startTime)}
-                        </button>
-                        <button
-                          class="p-0.5 text-gray-400 hover:text-white"
-                          on:click={() => adjustTime(index, true, -0.1)}
-                        >
-                          <Minus class="w-3 h-3" />
-                        </button>
-                        <button
-                          class="p-0.5 text-gray-400 hover:text-white"
-                          on:click={() => adjustTime(index, true, 0.1)}
-                        >
-                          <Plus class="w-3 h-3" />
-                        </button>
-                      </div>
-                      <span class="text-gray-400">→</span>
-                      <div class="flex items-center space-x-1">
-                        <button
-                          class="text-sm text-[#0A84FF] hover:text-[#0A84FF]/80"
-                          on:click={() => seekToTime(subtitle.endTime)}
-                        >
-                          {formatTime(subtitle.endTime)}
-                        </button>
-                        <button
-                          class="p-0.5 text-gray-400 hover:text-white"
-                          on:click={() => adjustTime(index, false, -0.1)}
-                        >
-                          <Minus class="w-3 h-3" />
-                        </button>
-                        <button
-                          class="p-0.5 text-gray-400 hover:text-white"
-                          on:click={() => adjustTime(index, false, 0.1)}
-                        >
-                          <Plus class="w-3 h-3" />
-                        </button>
-                      </div>
-                    </div>
-                    <button
-                      class="text-sm text-red-500 hover:text-red-400"
-                      on:click={async () => await removeSubtitle(index)}
-                    >
-                      删除
-                    </button>
-                  </div>
-                  <input
-                    type="text"
-                    bind:value={subtitle.text}
-                    class="w-full px-3 py-2 bg-[#2c2c2e] text-white rounded-lg border border-gray-800/50 focus:border-[#0A84FF] transition duration-200 outline-none hover:border-gray-700/50"
-                    placeholder="输入字幕文本"
-                  />
-                </div>
-              {/each}
-            </div>
-          </div>
-        {:else if activeTab === "upload"}
-          <!-- 投稿 Tab 内容 -->
-          <div class="p-4 space-y-6">
-            <!-- 封面预览 -->
-            {#if video && video.id != -1}
-              <section>
-                <div class="group">
-                  <div
-                    class="text-sm text-gray-400 mb-2 flex items-center justify-between"
-                  >
-                    <span>视频封面</span>
-                    <button
-                      class="text-[#0A84FF] hover:text-[#0A84FF]/80 transition-colors duration-200 flex items-center space-x-1"
-                      on:click={() => (show_cover_editor = true)}
-                    >
-                      <Pen class="w-4 h-4" />
-                      <span class="text-xs">创建新封面</span>
-                    </button>
-                  </div>
-                  <div
-                    class="relative rounded-xl overflow-hidden bg-black/20 border border-gray-800/50"
-                  >
-                    {#if video.cover && video.cover.trim() !== ""}
-                      <img
-                        src={video.cover}
-                        alt="视频封面"
-                        class="w-full"
-                        on:error={handleCoverError}
-                        style:display={showDefaultCoverIcon ? "none" : "block"}
-                      />
-                    {/if}
-                    {#if !video.cover || video.cover.trim() === "" || showDefaultCoverIcon}
-                      <div
-                        class="w-full aspect-video flex items-center justify-center bg-gray-800"
-                      >
-                        <!-- 默认视频图标 -->
-                        <svg
-                          class="w-16 h-16 text-gray-400"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                          ></path>
-                        </svg>
-                      </div>
-                    {/if}
-                  </div>
-                </div>
-              </section>
-            {/if}
-
-            <!-- 基本信息 -->
-            <div class="space-y-4">
-              <h3 class="text-sm font-medium text-gray-400">基本信息</h3>
-              <!-- 标题 -->
-              <div class="space-y-2">
-                <label
-                  for="title"
-                  class="block text-sm font-medium text-gray-300">标题</label
-                >
-                <input
-                  id="title"
-                  type="text"
-                  bind:value={profile.title}
-                  placeholder="输入视频标题"
-                  class="w-full px-3 py-2 bg-[#1c1c1e] text-white rounded-lg border border-gray-800/50 focus:border-[#0A84FF] transition duration-200 outline-none hover:border-gray-700/50"
-                />
-              </div>
-
-              <!-- 视频分区 -->
-              <div class="space-y-2">
-                <label for="tid" class="block text-sm font-medium text-gray-300"
-                  >视频分区</label
-                >
-                <div class="w-full" id="tid">
-                  <TypeSelect bind:value={profile.tid} />
-                </div>
-              </div>
-
-              <!-- 投稿账号 -->
-              <div class="space-y-2">
-                <label for="uid" class="block text-sm font-medium text-gray-300"
-                  >投稿账号</label
-                >
-                <select
-                  bind:value={uid_selected}
-                  class="w-full px-3 py-2 bg-[#1c1c1e] text-white rounded-lg border border-gray-800/50 focus:border-[#0A84FF] transition duration-200 outline-none appearance-none hover:border-gray-700/50"
-                >
-                  <option value={0}>选择账号</option>
-                  {#each accounts as account}
-                    <option value={account.value}>{account.name}</option>
-                  {/each}
-                </select>
-              </div>
-            </div>
-
-            <!-- 详细信息 -->
-            <div class="space-y-4">
-              <h3 class="text-sm font-medium text-gray-400">详细信息</h3>
-              <!-- 描述 -->
-              <div class="space-y-2">
-                <label
-                  for="desc"
-                  class="block text-sm font-medium text-gray-300">描述</label
-                >
-                <textarea
-                  id="desc"
-                  bind:value={profile.desc}
-                  placeholder="输入视频描述"
-                  class="w-full px-3 py-2 bg-[#1c1c1e] text-white rounded-lg border border-gray-800/50 focus:border-[#0A84FF] transition duration-200 outline-none resize-none h-24 hover:border-gray-700/50"
-                />
-              </div>
-
-              <!-- 标签 -->
-              <div class="space-y-2">
-                <label for="tag" class="block text-sm font-medium text-gray-300"
-                  >标签</label
-                >
-                <input
-                  id="tag"
-                  type="text"
-                  bind:value={profile.tag}
-                  placeholder="输入视频标签，用逗号分隔"
-                  class="w-full px-3 py-2 bg-[#1c1c1e] text-white rounded-lg border border-gray-800/50 focus:border-[#0A84FF] transition duration-200 outline-none hover:border-gray-700/50"
-                />
-              </div>
-
-              <!-- 动态 -->
-              <div class="space-y-2">
-                <label
-                  for="dynamic"
-                  class="block text-sm font-medium text-gray-300">动态</label
-                >
-                <textarea
-                  id="dynamic"
-                  bind:value={profile.dynamic}
-                  placeholder="输入动态内容"
-                  class="w-full px-3 py-2 bg-[#1c1c1e] text-white rounded-lg border border-gray-800/50 focus:border-[#0A84FF] transition duration-200 outline-none resize-none h-24 hover:border-gray-700/50"
-                />
-              </div>
-            </div>
-
-            <!-- 投稿按钮 -->
-            {#if video}
-              <div class="pt-4">
-                <div class="flex gap-2">
-                  <button
-                    on:click={do_post}
-                    disabled={current_post_event_id != null || !uid_selected}
-                    class="flex-1 px-3 py-2 bg-[#0A84FF] text-white rounded-lg transition-all duration-200 hover:bg-[#0A84FF]/90 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2 text-sm"
-                  >
-                    {#if current_post_event_id != null}
-                      <div
-                        class="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin"
-                      />
-                    {/if}
-                    <span id="post-prompt">投稿</span>
-                  </button>
-                  {#if current_post_event_id != null}
-                    <button
-                      on:click={() => cancel_post()}
-                      class="px-3 py-2 bg-red-500 text-white rounded-lg transition-all duration-200 hover:bg-red-500/90 flex items-center justify-center text-sm"
-                    >
-                      取消
-                    </button>
-                  {/if}
-                </div>
-              </div>
-            {/if}
-          </div>
-        {/if}
+        <VideoPreviewTransport
+          {isPreviewDisplayMenuVisible}
+          {hidePreviewDisplayMenuDuringPanelTransition}
+          bind:previewDisplayMenuElement
+          {isPreviewDisplayMenuInteractionLocked}
+          {getPreviewDisplayMenuMetrics}
+          previewDisplayMenuWidth={PREVIEW_DISPLAY_MENU_WIDTH}
+          previewDisplayMenuHeight={PREVIEW_DISPLAY_MENU_HEIGHT}
+          {openPreviewDisplayMenu}
+          {previewDisplayMenuController}
+          {showSubtitleTimeline}
+          {togglePreviewDisplaySubtitleTimeline}
+          {showWaveform}
+          {togglePreviewDisplayWaveform}
+          {showPbpOverlay}
+          {togglePreviewDisplayPbp}
+          {seekbarPbpVisible}
+          {handlePbpOverlayMouseDown}
+          {seekbarPbpViewBoxValue}
+          {seekbarPbpCurveClipPathId}
+          {seekbarPbpPlayedClipPathId}
+          {seekbarPbpCurvePath}
+          {seekbarPbpPlayedWidth}
+          seekbarPbpViewboxWidth={SEEKBAR_PBP_VIEWBOX_WIDTH}
+          seekbarPbpViewboxHeight={SEEKBAR_PBP_VIEWBOX_HEIGHT}
+          {isPlaying}
+          {togglePlay}
+          {playIconSeed}
+          {openTimeSeekInput}
+          {handleTimeSeekKeydown}
+          {isTimeSeekEditing}
+          bind:timeSeekValue
+          bind:timeSeekInput
+          {handleTimeSeekInputKeydown}
+          {closeTimeSeekInput}
+          {currentTime}
+          {playbackDurationValue}
+          {formatTimeForSeekInput}
+          bind:timelineZoomControlElement
+          bind:timelineSliderValue
+          {timelineZoomSteps}
+          timelineZoomNotchCount={TIMELINE_ZOOM_NOTCH_PERCENTS.length}
+          {handleTimelineZoomControlWheel}
+          {handleScaleChange}
+          {handleScaleCommit}
+          bind:playbackRateTriggerElement
+          {isPlaybackRateMenuVisible}
+          {canAdjustPlaybackRateValue}
+          {playbackRateMenuController}
+          {playbackRateDisplayLabelValue}
+          playbackRateOptions={PLAYBACK_RATE_OPTIONS}
+          {getSelectedPlaybackRate}
+          {handlePlaybackRateSelect}
+          bind:previewSettingsControlElement
+          bind:previewSettingsButtonElement
+          {handleSettingsMouseEnter}
+          {handleSettingsMouseLeave}
+          {isSettingsHover}
+          {isVolumeMutedValue}
+          {isVolumeMenuVisible}
+          {volumeMenuController}
+          {toggleMute}
+          {isVolumeHover}
+          {isVolumeClickAnimating}
+          {isVolumeHoverSuppressed}
+          {volumeIconSeed}
+          {effectiveVolumePercentValue}
+          bind:volume
+          {handleVolumeChange}
+          {handleVolumeMouseEnter}
+          {handleVolumeMouseLeave}
+          {isWindowWide}
+          {toggleWindowWide}
+          {isWideHover}
+          onWideHoverChange={(value) => (isWideHover = value)}
+          {isWebFullscreen}
+          {toggleWebFullscreen}
+          {isWebFullscreenHover}
+          onWebFullscreenHoverChange={(value) =>
+            (isWebFullscreenHover = value)}
+          {isDocumentFullscreen}
+          {toggleFullscreen}
+          {isFullscreenHover}
+          onFullscreenHoverChange={(value) => (isFullscreenHover = value)}
+          bind:timelineContainer
+          {handleWheel}
+          {handleTimelineScroll}
+          bind:waveformGestureElement
+          {waveformScale}
+          {showWaveformLayoutVisible}
+          waveformPanelHeightPx={WAVEFORM_PANEL_HEIGHT_PX}
+          {isWaveformLoading}
+          bind:waveformContainer
+          bind:timelineElement
+          {timelineScale}
+          {showSubtitleTimelineLayoutVisible}
+          {scheduleTimelineRefresh}
+          {isDraggingSeekbar}
+          {handleTimelineClick}
+          canClip={canBeClipped(video)}
+          {clipSelections}
+          {activeClipSelectionId}
+          {hasPendingClipStartMarker}
+          {pendingClipStartTime}
+          videoDuration={videoElement?.duration ?? 0}
+          bind:seekbarElement
+          bind:seekbarProgressElement
+          {handleSeekbarMouseDown}
+          {handleSeekbarMouseEnter}
+          {handleSeekbarMouseHoverMove}
+          {handleSeekbarMouseLeave}
+          {isSeekbarTrackHovering}
+          {seekbarCurrentRatioValue}
+          {isSeekbarHovering}
+          {seekbarCurrentXValue}
+          seekbarThumbSize={SEEKBAR_THUMB_SIZE}
+          {showSeekbarMoveIndicatorValue}
+          {seekbarPointerXValue}
+          {timeMarkers}
+          {formatTimelineMarkerTime}
+          {showSubtitleTimelineEffective}
+          {subtitles}
+          {getSubtitleStyle}
+          {handleBlockMouseDown}
+          {handleTimelineMouseDown}
+          {showSeekbarPopupValue}
+          {seekbarPopupViewportLeftValue}
+          {seekbarPopupViewportTopValue}
+          {seekbarPreviewImageSrc}
+          transparentSeekbarPreviewImage={TRANSPARENT_SEEKBAR_PREVIEW_IMAGE}
+          {seekbarPopupTimeValue}
+        />
       </div>
+
+      <VideoPreviewSidePanel
+        bind:activeTab
+        {subtitles}
+        {currentSubtitleIndex}
+        currentGenerateEventId={current_generate_event_id}
+        {formatTime}
+        onOpenStyleEditor={() => (showStyleEditor = true)}
+        onClearSubtitles={clearSubtitles}
+        onGenerateSubtitles={generateSubtitles}
+        onAddSubtitle={addSubtitle}
+        onSeekToTime={seekToTime}
+        onAdjustTime={adjustTime}
+        onRemoveSubtitle={removeSubtitle}
+        {clipSelections}
+        {activeClipSelectionId}
+        bind:clipExportSelectionIds
+        bind:mergeClipSelectionsOnExport
+        onSetActiveClipSelection={setActiveClipSelection}
+        {video}
+        {profile}
+        bind:uidSelected={uid_selected}
+        {accounts}
+        currentPostEventId={current_post_event_id}
+        bind:showCoverEditor={show_cover_editor}
+        {showDefaultCoverIcon}
+        {handleCoverError}
+        doPost={do_post}
+        cancelPost={cancel_post}
+        {danmuEnabled}
+        {renderDanmuEmotes}
+        {danmuPreventSubtitleOcclusionEnabled}
+        {danmuSyncWithPlaybackRateEnabled}
+        {danmakuStyle}
+        bind:danmakuDisplayAreaIndex
+        bind:danmakuSpeedPresetIndex
+        bind:danmakuMaxOnScreenIndex
+        {isDanmuFontMenuVisible}
+        {isPbpMethodMenuVisible}
+        {seekbarPbpGenerationMethod}
+        danmakuDisplayAreaOptions={DANMAKU_DISPLAY_AREA_OPTIONS}
+        danmakuSpeedPresetOptions={DANMAKU_SPEED_PRESET_OPTIONS}
+        danmakuMaxOnScreenOptions={DANMAKU_MAX_ON_SCREEN_OPTIONS}
+        danmakuFontOptions={DANMAKU_FONT_OPTIONS}
+        {seekbarPbpMethodOptions}
+        {danmuFontMenuController}
+        {pbpMethodMenuController}
+        onDanmuToggle={handleDanmuToggle}
+        onRenderDanmuEmotesToggle={handleRenderDanmuEmotesToggle}
+        onDanmuPreventSubtitleOcclusionToggle={handleDanmuPreventSubtitleOcclusionToggle}
+        onDanmuSyncWithPlaybackRateToggle={handleDanmuSyncWithPlaybackRateToggle}
+        onDanmuBoldToggle={handleDanmuBoldToggle}
+        onToggleDanmuFontMenu={toggleDanmuFontMenu}
+        onHandleDanmuFontSelect={handleDanmuFontSelect}
+        onTogglePbpMethodMenu={togglePbpMethodMenu}
+        onHandleSeekbarPbpMethodSelect={handleSeekbarPbpMethodSelect}
+      />
     </div>
   </div>
 {/if}
@@ -2274,84 +4224,68 @@
 />
 
 <!-- 键盘快捷键监听 -->
-<svelte:window on:keydown={handleKeydown} />
+<svelte:window
+  on:keydown={handleKeydown}
+  on:keyup={handleKeyup}
+  on:click={handleWindowClick}
+  on:focus={handleWindowFocus}
+  on:blur={handleWindowBlur}
+/>
 
 <style>
-  /* 拖动时禁用过渡动画，避免与JS更新冲突 */
-  .no-transition {
-    transition: none !important;
-  }
-
-  /* 确保层级顺序正确 */
   .z-15 {
     z-index: 15;
   }
 
-  /* Shaka Player风格的进度条样式 */
-  .shaka-seek-bar-container {
-    position: relative;
-    background: rgba(255, 255, 255, 0.3);
-    transition: height 0.2s cubic-bezier(0.4, 0, 1, 1);
+  :global(.lottie-icon) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
   }
 
-  .shaka-seek-bar-container:hover {
-    background: rgba(255, 255, 255, 0.4);
+  :global(.lottie-icon--hint) {
+    width: 30px;
+    height: 18px;
   }
 
-  /* 确保切片选区在hover时也有相同的高度变化 */
-  .group:hover .shaka-seek-bar-container {
-    height: 6px;
-  }
-
-  /* 拖动状态样式 */
-  .shaka-seek-bar-container.dragging {
-    background: rgba(255, 255, 255, 0.5);
-    height: 6px;
-  }
-
-  /* 普通range输入框样式（不影响进度条） */
-  input[type="range"]:not(.progress-bar) {
-    -webkit-appearance: none;
-    appearance: none;
-  }
-
-  input[type="range"]:not(.progress-bar)::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: white;
-    border: none;
-    cursor: pointer;
-  }
-
-  input[type="range"]:not(.progress-bar)::-webkit-slider-track {
-    height: 4px;
-    border-radius: 2px;
-    background: #4a5568;
-  }
-
-  input[type="range"]:not(.progress-bar)::-moz-range-thumb {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: white;
-    border: none;
-    cursor: pointer;
-  }
-
-  input[type="range"]:not(.progress-bar)::-moz-range-track {
-    height: 4px;
-    border-radius: 2px;
-    background: #4a5568;
-  }
-
-  /* WaveSurfer.js 样式 */
-  .waveform-container {
-    background: #1c1c1e;
+  .three-playrate-hint {
+    pointer-events: none;
+    position: absolute;
+    top: 18px;
+    left: 50%;
+    z-index: 77;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 130px;
+    height: 34px;
+    margin-left: -65px;
     border-radius: 4px;
-    width: 100%;
-    height: 100%;
+    background-color: rgba(33, 33, 33, 0.9);
+    color: #fff;
+    line-height: 34px;
+    user-select: none;
+  }
+
+  .three-playrate-hint-icon {
+    display: inline-block;
+    flex: 0 0 auto;
+    width: 30px;
+    height: 18px;
+    margin-right: 8px;
+  }
+
+  .three-playrate-hint-text {
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .clip-preview-stable-overlay {
+    contain: layout paint;
+    isolation: isolate;
+    transform: translateZ(0);
+    backface-visibility: hidden;
   }
 </style>
