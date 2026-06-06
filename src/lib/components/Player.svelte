@@ -3,9 +3,30 @@
 </script>
 
 <script lang="ts">
+  import {
+    DANMAKU_DURATION_SECONDS,
+    DANMAKU_EMOTE_SCALE,
+    DANMAKU_FONT_SIZE_PX,
+    DANMAKU_FONT_FAMILY,
+    DANMAKU_FONT_WEIGHT,
+    DANMAKU_LINE_HEIGHT,
+    DANMAKU_TEXT_SHADOW,
+    loadDanmakuStyle,
+    getDanmakuEmoteTextGap,
+    getDanmakuEmoteRenderKind,
+    loadDanmakuEmoteMap,
+    parseDanmakuContent,
+  } from "../danmaku-emotes";
   import { invoke, TAURI_ENV, ENDPOINT, listen, log } from "../invoker";
   import type { AccountInfo } from "../db";
-  import type { Marker, RecorderList, RecorderInfo, Range } from "../interface";
+  import type {
+    DanmakuStyle,
+    DanmakuEmoteMap,
+    Marker,
+    RecorderList,
+    RecorderInfo,
+    Range,
+  } from "../interface";
 
   import { createEventDispatcher } from "svelte";
   import {
@@ -39,6 +60,8 @@
   let show_list = false;
   let show_export = false;
   let recorders: RecorderInfo[] = [];
+  let danmakuStyle: DanmakuStyle = loadDanmakuStyle(room_id);
+  let danmakuEmoteMap: DanmakuEmoteMap = {};
 
   let start = 0;
   let end = 0;
@@ -363,6 +386,12 @@ ${mediaPlaylistUrl}`;
 
   async function init() {
     update_stream_list();
+    danmakuStyle = loadDanmakuStyle(room_id);
+    danmakuEmoteMap = await loadDanmakuEmoteMap();
+    log.info("Player danmaku emote map loaded", {
+      count: Object.keys(danmakuEmoteMap).length,
+      keys: Object.keys(danmakuEmoteMap).slice(0, 20),
+    });
 
     setInterval(async () => {
       await update_stream_list();
@@ -644,6 +673,8 @@ ${mediaPlaylistUrl}`;
 
     function danmu_handler(content: string) {
       const danmaku = document.createElement("p");
+      const danmakuFontSize = `${DANMAKU_FONT_SIZE_PX * danmakuStyle.fontScale}px`;
+      const danmakuEmoteSize = `${DANMAKU_EMOTE_SCALE}em`;
       danmaku.style.position = "absolute";
 
       // Calculate a random position for the danmaku
@@ -666,17 +697,69 @@ ${mediaPlaylistUrl}`;
       danmaku.style.top = `${topPosition}%`;
       danmaku.style.right = "0";
       danmaku.style.color = "white";
-      danmaku.style.fontSize = "1.2em";
-      danmaku.style.whiteSpace = "nowrap";
+      danmaku.style.opacity = `${danmakuStyle.opacity}`;
+      danmaku.style.fontSize = danmakuFontSize;
+      danmaku.style.fontFamily = DANMAKU_FONT_FAMILY;
+      danmaku.style.fontWeight = DANMAKU_FONT_WEIGHT;
+      danmaku.style.lineHeight = `${DANMAKU_LINE_HEIGHT}`;
+      danmaku.style.whiteSpace = "pre";
       danmaku.style.transform = "translateX(100%)";
-      danmaku.style.transition = "transform 10s linear";
+      danmaku.style.transition = `transform ${DANMAKU_DURATION_SECONDS}s linear`;
       danmaku.style.pointerEvents = "none";
       danmaku.style.margin = "0";
       danmaku.style.padding = "0";
       danmaku.style.zIndex = "500";
-      danmaku.style.textShadow = "1px 1px 2px rgba(0, 0, 0, 0.6)";
-      danmaku.innerText = content;
+      danmaku.style.textShadow = DANMAKU_TEXT_SHADOW;
+      danmaku.style.display = "flex";
+      danmaku.style.alignItems = "center";
+
+      const segments = parseDanmakuContent(content, danmakuEmoteMap);
+      const emoteRenderKind = getDanmakuEmoteRenderKind(segments);
+      if (segments.length === 0) {
+        danmaku.appendChild(document.createTextNode(content));
+      } else {
+        for (const [index, segment] of segments.entries()) {
+          if (segment.kind === "text") {
+            danmaku.appendChild(document.createTextNode(segment.text));
+            continue;
+          }
+
+          const spacing = getDanmakuEmoteTextGap(segments, index);
+          const img = document.createElement("img");
+          img.src = segment.src;
+          img.alt = segment.token;
+          img.draggable = false;
+          img.style.height = danmakuEmoteSize;
+          img.style.width = "auto";
+          img.style.display = "block";
+          img.style.marginLeft = `${spacing.marginLeftEm}em`;
+          img.style.marginRight = `${spacing.marginRightEm}em`;
+          img.style.flex = "0 0 auto";
+          img.style.maxWidth = "none";
+          img.style.objectFit = "contain";
+          img.addEventListener("error", () => {
+            img.replaceWith(document.createTextNode(segment.token));
+          });
+          danmaku.appendChild(img);
+        }
+      }
       overlay.appendChild(danmaku);
+      if (emoteRenderKind !== "none") {
+        requestAnimationFrame(() => {
+          const firstEmote = danmaku.querySelector("img");
+          const danmakuStyle = window.getComputedStyle(danmaku);
+          log.info("Player danmaku emote render", {
+            kind: emoteRenderKind,
+            content,
+            fontSize: danmakuStyle.fontSize,
+            lineHeight: danmakuStyle.lineHeight,
+            danmakuWidth: danmaku.clientWidth,
+            danmakuHeight: danmaku.clientHeight,
+            emoteWidth: firstEmote?.clientWidth ?? null,
+            emoteHeight: firstEmote?.clientHeight ?? null,
+          });
+        });
+      }
       requestAnimationFrame(() => {
         danmaku.style.transform = `translateX(-${overlay.clientWidth + danmaku.clientWidth}px)`;
       });
