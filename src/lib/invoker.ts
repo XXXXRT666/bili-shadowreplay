@@ -148,7 +148,10 @@ async function get_static_url(base: string, path: string) {
     staticUrl = ENDPOINT;
   }
 
-  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  const encodedPath = path
+    .split(/[\\/]/)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
   return `${staticUrl}/${base}/${encodedPath}`;
 }
 

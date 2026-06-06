@@ -145,6 +145,13 @@ export interface Config {
   whisper_prompt: string;
   openai_api_endpoint: string;
   openai_api_key: string;
+  online_asr_model: string;
+  asr_hotwords: AsrHotwordConfig;
+  oss_access_key_id: string;
+  oss_access_key_secret: string;
+  oss_bucket: string;
+  oss_endpoint: string;
+  oss_object_prefix: string;
   clip_name_format: string;
   auto_generate: AutoGenerateConfig;
   status_check_interval: number;
@@ -152,6 +159,23 @@ export interface Config {
   webhook_url: string;
   danmu_ass_options: Danmu2AssOptions;
   powerlive_key: string;
+  use_native_clip_player: boolean;
+  native_clip_player_windowed_offset: number;
+  use_seekbar_thumbnail_cache: boolean;
+}
+
+export interface AsrHotwordConfig {
+  prefix: string;
+  vocabulary_id: string;
+  vocabulary_signature: string;
+  target_model: string;
+  words: AsrHotword[];
+}
+
+export interface AsrHotword {
+  text: string;
+  weight: number;
+  lang: string;
 }
 
 export interface Danmu2AssOptions {
@@ -225,6 +249,7 @@ export interface ProgressFinished {
 export interface SubtitleStyle {
   fontName: string;
   fontSize: number;
+  fontWeight: number;
   fontColor: string;
   outlineColor: string;
   outlineWidth: number;
@@ -232,6 +257,20 @@ export interface SubtitleStyle {
   marginV: number;
   marginL: number;
   marginR: number;
+}
+
+export interface DanmakuStyle {
+  fontScale: number;
+  opacity: number;
+  displayArea: 10 | 25 | 50 | 75 | 100;
+  speedPreset: 0 | 1 | 2 | 3 | 4;
+  maxOnScreen: -1 | 25 | 50 | 100 | 200;
+  bold: boolean;
+  fontFamily: string;
+}
+
+export interface DanmuRenderOptions extends DanmakuStyle {
+  preventSubtitleOcclusion: boolean;
 }
 
 export function parseSubtitleStyle(style: SubtitleStyle): string {
@@ -246,13 +285,33 @@ export function parseSubtitleStyle(style: SubtitleStyle): string {
 
   return `FontName=${style.fontName},FontSize=${
     style.fontSize
-  },PrimaryColour=${hexToAssColor(
+  },Bold=${style.fontWeight >= 700 ? -1 : 0},PrimaryColour=${hexToAssColor(
     style.fontColor
   )},OutlineColour=${hexToAssColor(style.outlineColor)},Outline=${
     style.outlineWidth
   },Alignment=${style.alignment},MarginV=${style.marginV},MarginL=${
     style.marginL
   },MarginR=${style.marginR}`;
+}
+
+export function buildSubtitlePreviewTextShadow(
+  outlineWidth: number,
+  outlineColor: string
+): string {
+  if (outlineWidth <= 0) {
+    return "none";
+  }
+
+  return `
+    ${outlineWidth}px 0 0 ${outlineColor},
+    -${outlineWidth}px 0 0 ${outlineColor},
+    0 ${outlineWidth}px 0 ${outlineColor},
+    0 -${outlineWidth}px 0 ${outlineColor},
+    ${outlineWidth}px ${outlineWidth}px 0 ${outlineColor},
+    -${outlineWidth}px ${outlineWidth}px 0 ${outlineColor},
+    ${outlineWidth}px -${outlineWidth}px 0 ${outlineColor},
+    -${outlineWidth}px -${outlineWidth}px 0 ${outlineColor}
+  `;
 }
 
 export interface Range {
@@ -286,7 +345,19 @@ export async function clipRange(eventId: string, params: ClipRangeParams) {
 export interface DanmuEntry {
   ts: number;
   content: string;
+  renderEmotes?: boolean;
 }
+
+export interface VideoPbpData {
+  bvid: string;
+  aid: number;
+  cid: number;
+  page: number;
+  stepSec: number;
+  values: number[];
+}
+
+export type DanmakuEmoteMap = Record<string, string>;
 
 export interface RecorderList {
   count: number;
