@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{AsrHotwordConfig, Config};
 #[cfg(feature = "headless")]
 use crate::constants::API_PORT;
 use crate::danmu2ass::Danmu2AssOptions;
@@ -232,6 +232,18 @@ pub async fn update_openai_api_key(state: state_type!(), openai_api_key: String)
 }
 
 #[cfg_attr(feature = "gui", tauri::command)]
+pub async fn update_online_asr_model(
+    state: state_type!(),
+    online_asr_model: String,
+) -> Result<(), ()> {
+    log::info!("Updating online asr model to {online_asr_model}");
+    let mut config = state.config.write().await;
+    config.online_asr_model = online_asr_model;
+    config.save();
+    Ok(())
+}
+
+#[cfg_attr(feature = "gui", tauri::command)]
 pub async fn update_openai_api_endpoint(
     state: state_type!(),
     openai_api_endpoint: String,
@@ -241,6 +253,76 @@ pub async fn update_openai_api_endpoint(
     config.openai_api_endpoint = openai_api_endpoint;
     config.save();
     Ok(())
+}
+
+#[cfg_attr(feature = "gui", tauri::command)]
+pub async fn update_oss_setting(
+    state: state_type!(),
+    oss_access_key_id: String,
+    oss_access_key_secret: String,
+    oss_bucket: String,
+    oss_endpoint: String,
+    oss_object_prefix: String,
+) -> Result<(), ()> {
+    log::info!("Updating OSS setting bucket={oss_bucket} endpoint={oss_endpoint}");
+    let mut config = state.config.write().await;
+    config.oss_access_key_id = oss_access_key_id;
+    config.oss_access_key_secret = oss_access_key_secret;
+    config.oss_bucket = oss_bucket;
+    config.oss_endpoint = oss_endpoint;
+    config.oss_object_prefix = oss_object_prefix;
+    config.save();
+    Ok(())
+}
+
+#[cfg_attr(feature = "gui", tauri::command)]
+pub async fn update_asr_hotwords(
+    state: state_type!(),
+    asr_hotwords: AsrHotwordConfig,
+) -> Result<(), ()> {
+    log::info!(
+        "Updating ASR hotwords prefix={} words={}",
+        asr_hotwords.prefix,
+        asr_hotwords.words.len()
+    );
+    let mut config = state.config.write().await;
+    config.asr_hotwords = asr_hotwords;
+    config.save();
+    Ok(())
+}
+
+#[cfg_attr(feature = "gui", tauri::command)]
+pub async fn sync_asr_hotwords(state: state_type!()) -> Result<AsrHotwordConfig, String> {
+    let (api_url, api_key, model, hotwords) = {
+        let config = state.config.read().await;
+        (
+            config.openai_api_endpoint.clone(),
+            config.openai_api_key.clone(),
+            config.online_asr_model.clone(),
+            config.asr_hotwords.clone(),
+        )
+    };
+    let synced = crate::subtitle_generator::whisper_online::sync_asr_hotwords(
+        &api_url, &api_key, &model, &hotwords,
+    )
+    .await?;
+    let mut config = state.config.write().await;
+    config.asr_hotwords = synced.clone();
+    config.save();
+    Ok(synced)
+}
+
+pub async fn ensure_asr_hotwords_synced(config: &mut Config) -> Result<AsrHotwordConfig, String> {
+    let synced = crate::subtitle_generator::whisper_online::sync_asr_hotwords(
+        &config.openai_api_endpoint,
+        &config.openai_api_key,
+        &config.online_asr_model,
+        &config.asr_hotwords,
+    )
+    .await?;
+    config.asr_hotwords = synced.clone();
+    config.save();
+    Ok(synced)
 }
 
 #[cfg_attr(feature = "gui", tauri::command)]
@@ -319,5 +401,43 @@ pub async fn update_powerlive_key(state: state_type!(), powerlive_key: String) -
     state.config.write().await.powerlive_key = powerlive_key.clone();
     state.config.write().await.save();
     log::info!("Updated powerlive key");
+    Ok(())
+}
+
+#[cfg_attr(feature = "gui", tauri::command)]
+pub async fn update_use_native_clip_player(
+    state: state_type!(),
+    use_native_clip_player: bool,
+) -> Result<(), ()> {
+    state.config.write().await.use_native_clip_player = use_native_clip_player;
+    state.config.write().await.save();
+    log::info!("Updated use_native_clip_player: {use_native_clip_player}");
+    Ok(())
+}
+
+#[cfg_attr(feature = "gui", tauri::command)]
+pub async fn update_native_clip_player_windowed_offset(
+    state: state_type!(),
+    native_clip_player_windowed_offset: i32,
+) -> Result<(), ()> {
+    let offset = native_clip_player_windowed_offset.clamp(-200, 200);
+    state
+        .config
+        .write()
+        .await
+        .native_clip_player_windowed_offset = offset;
+    state.config.write().await.save();
+    log::info!("Updated native_clip_player_windowed_offset: {offset}");
+    Ok(())
+}
+
+#[cfg_attr(feature = "gui", tauri::command)]
+pub async fn update_use_seekbar_thumbnail_cache(
+    state: state_type!(),
+    use_seekbar_thumbnail_cache: bool,
+) -> Result<(), ()> {
+    state.config.write().await.use_seekbar_thumbnail_cache = use_seekbar_thumbnail_cache;
+    state.config.write().await.save();
+    log::info!("Updated use_seekbar_thumbnail_cache: {use_seekbar_thumbnail_cache}");
     Ok(())
 }

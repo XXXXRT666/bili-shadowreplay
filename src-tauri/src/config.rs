@@ -26,6 +26,20 @@ pub struct Config {
     pub openai_api_endpoint: String,
     #[serde(default = "default_openai_api_key")]
     pub openai_api_key: String,
+    #[serde(default = "default_online_asr_model")]
+    pub online_asr_model: String,
+    #[serde(default = "default_asr_hotwords")]
+    pub asr_hotwords: AsrHotwordConfig,
+    #[serde(default = "default_oss_access_key_id")]
+    pub oss_access_key_id: String,
+    #[serde(default = "default_oss_access_key_secret")]
+    pub oss_access_key_secret: String,
+    #[serde(default = "default_oss_bucket")]
+    pub oss_bucket: String,
+    #[serde(default = "default_oss_endpoint")]
+    pub oss_endpoint: String,
+    #[serde(default = "default_oss_object_prefix")]
+    pub oss_object_prefix: String,
     #[serde(default = "default_clip_name_format")]
     pub clip_name_format: String,
     #[serde(default = "default_auto_generate_config")]
@@ -44,12 +58,39 @@ pub struct Config {
     pub update_interval: Arc<AtomicU64>,
     #[serde(default = "default_powerlive_key")]
     pub powerlive_key: String,
+    #[serde(default = "default_use_native_clip_player")]
+    pub use_native_clip_player: bool,
+    #[serde(default = "default_native_clip_player_windowed_offset")]
+    pub native_clip_player_windowed_offset: i32,
+    #[serde(default = "default_use_seekbar_thumbnail_cache")]
+    pub use_seekbar_thumbnail_cache: bool,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct AutoGenerateConfig {
     pub enabled: bool,
     pub encode_danmu: bool,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct AsrHotwordConfig {
+    #[serde(default = "default_asr_hotword_prefix")]
+    pub prefix: String,
+    #[serde(default)]
+    pub vocabulary_id: String,
+    #[serde(default)]
+    pub vocabulary_signature: String,
+    #[serde(default)]
+    pub target_model: String,
+    #[serde(default)]
+    pub words: Vec<AsrHotword>,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
+pub struct AsrHotword {
+    pub text: String,
+    pub weight: u8,
+    pub lang: String,
 }
 
 fn default_danmu_ass_options() -> Danmu2AssOptions {
@@ -69,7 +110,7 @@ fn default_whisper_model() -> String {
 }
 
 fn default_whisper_prompt() -> String {
-    "这是一段中文 你们好".to_string()
+    "".to_string()
 }
 
 fn default_openai_api_endpoint() -> String {
@@ -78,6 +119,44 @@ fn default_openai_api_endpoint() -> String {
 
 fn default_openai_api_key() -> String {
     String::new()
+}
+
+fn default_online_asr_model() -> String {
+    "whisper-1".to_string()
+}
+
+fn default_asr_hotword_prefix() -> String {
+    "bsrasr".to_string()
+}
+
+fn default_asr_hotwords() -> AsrHotwordConfig {
+    AsrHotwordConfig {
+        prefix: default_asr_hotword_prefix(),
+        vocabulary_id: String::new(),
+        vocabulary_signature: String::new(),
+        target_model: String::new(),
+        words: Vec::new(),
+    }
+}
+
+fn default_oss_access_key_id() -> String {
+    String::new()
+}
+
+fn default_oss_access_key_secret() -> String {
+    String::new()
+}
+
+fn default_oss_bucket() -> String {
+    String::new()
+}
+
+fn default_oss_endpoint() -> String {
+    "https://oss-cn-beijing.aliyuncs.com".to_string()
+}
+
+fn default_oss_object_prefix() -> String {
+    "bili-shadowreplay/asr".to_string()
 }
 
 fn default_clip_name_format() -> String {
@@ -105,6 +184,18 @@ fn default_webhook_url() -> String {
 
 fn default_powerlive_key() -> String {
     String::new()
+}
+
+fn default_use_native_clip_player() -> bool {
+    true
+}
+
+fn default_native_clip_player_windowed_offset() -> i32 {
+    28
+}
+
+fn default_use_seekbar_thumbnail_cache() -> bool {
+    true
 }
 
 impl Config {
@@ -140,6 +231,13 @@ impl Config {
             whisper_prompt: default_whisper_prompt(),
             openai_api_endpoint: default_openai_api_endpoint(),
             openai_api_key: default_openai_api_key(),
+            online_asr_model: default_online_asr_model(),
+            asr_hotwords: default_asr_hotwords(),
+            oss_access_key_id: default_oss_access_key_id(),
+            oss_access_key_secret: default_oss_access_key_secret(),
+            oss_bucket: default_oss_bucket(),
+            oss_endpoint: default_oss_endpoint(),
+            oss_object_prefix: default_oss_object_prefix(),
             clip_name_format: default_clip_name_format(),
             auto_generate: default_auto_generate_config(),
             status_check_interval: default_status_check_interval(),
@@ -149,6 +247,9 @@ impl Config {
             danmu_ass_options: default_danmu_ass_options(),
             update_interval: Arc::new(AtomicU64::new(default_status_check_interval())),
             powerlive_key: default_powerlive_key(),
+            use_native_clip_player: default_use_native_clip_player(),
+            native_clip_player_windowed_offset: default_native_clip_player_windowed_offset(),
+            use_seekbar_thumbnail_cache: default_use_seekbar_thumbnail_cache(),
         };
 
         config.save();
@@ -229,8 +330,11 @@ impl Config {
 
         let sanitized = sanitize_filename::sanitize(&format_config);
         let output = self.output.clone();
+        let grouped_dir = Path::new(&output)
+            .join(sanitize_filename::sanitize(&params.platform))
+            .join(sanitize_filename::sanitize(&params.room_id));
 
-        Path::new(&output).join(&sanitized)
+        grouped_dir.join(&sanitized)
     }
 
     pub fn set_status_check_interval(&mut self, interval: u64) {

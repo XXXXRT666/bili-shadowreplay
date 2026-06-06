@@ -1290,9 +1290,12 @@ impl RecorderManager {
             });
         }
         log::info!("[{}]Temp clip file generated: {}", room_id, clip_file_path);
-
-        // Read config to determine generator type
-        let config = self.config.read().await;
+        let mut config = self.config.write().await;
+        if config.subtitle_generator_type == "whisper_online" {
+            crate::handlers::config::ensure_asr_hotwords_synced(&mut config)
+                .await
+                .map_err(|e| RecorderManagerError::SubtitleGenerationFailed { error: e })?;
+        }
         let generator_type = config.subtitle_generator_type.as_str();
 
         // For third-party services (powerlive), extract opus audio from mp4
@@ -1333,7 +1336,7 @@ impl RecorderManager {
             opus_file_path
         } else {
             // For whisper/whisper_online, use mp4 directly
-            clip_file_path
+            clip_file_path.clone()
         };
 
         // generate subtitle file
@@ -1345,6 +1348,13 @@ impl RecorderManager {
             &config.whisper_prompt,
             &config.openai_api_key,
             &config.openai_api_endpoint,
+            &config.online_asr_model,
+            &config.oss_access_key_id,
+            &config.oss_access_key_secret,
+            &config.oss_bucket,
+            &config.oss_endpoint,
+            &config.oss_object_prefix,
+            &config.asr_hotwords.vocabulary_id,
             &config.whisper_language,
         )
         .await;
@@ -1613,10 +1623,23 @@ impl RecorderManager {
             std::path::PathBuf::from(sanitized_filename)
         };
 
-        let cover_filename = output_filename.with_extension("jpg");
-
-        let output_path =
-            Path::new(&self.config.read().await.output.as_str()).join(&output_filename);
+        let output_root = PathBuf::from(self.config.read().await.output.as_str());
+        let output_dir = output_root
+            .join(platform.as_str())
+            .join(sanitize_filename::sanitize(&room_id));
+        if !output_dir.exists() {
+            std::fs::create_dir_all(&output_dir).map_err(RecorderManagerError::from)?;
+        }
+        let output_path = output_dir.join(&output_filename);
+        let cover_path = output_path.with_extension("jpg");
+        let output_relative_path = output_path
+            .strip_prefix(&output_root)
+            .map(|v| v.to_path_buf())
+            .unwrap_or_else(|_| PathBuf::from(&output_filename));
+        let cover_relative_path = cover_path
+            .strip_prefix(&output_root)
+            .map(|v| v.to_path_buf())
+            .unwrap_or_else(|_| PathBuf::from(cover_path.file_name().unwrap_or_default()));
 
         let playlists_refs: Vec<&Path> = playlists.iter().map(|p| p.path.as_path()).collect();
 
@@ -1658,6 +1681,13 @@ impl RecorderManager {
 
         let _ = crate::ffmpeg::generate_thumbnail(Path::new(&output_path), 0.0).await;
         let _ = crate::ffmpeg::extract_audio_sample(Path::new(&output_path)).await;
+        if let Err(error) = crate::ffmpeg::generate_audio_waveform(Path::new(&output_path)).await {
+            log::warn!(
+                "Failed to generate waveform cache for {}: {}",
+                output_path.display(),
+                error
+            );
+        }
 
         let video = self
             .db
@@ -1666,8 +1696,8 @@ impl RecorderManager {
                 status: 0,
                 room_id: room_id.to_string(),
                 created_at: chrono::Local::now().to_rfc3339(),
-                cover: cover_filename.to_string_lossy().to_string(),
-                file: output_filename.to_string_lossy().to_string(),
+                cover: cover_relative_path.to_string_lossy().to_string(),
+                file: output_relative_path.to_string_lossy().to_string(),
                 note: "".into(),
                 length,
                 size,

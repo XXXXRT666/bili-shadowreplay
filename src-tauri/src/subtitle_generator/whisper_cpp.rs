@@ -17,11 +17,15 @@ pub struct WhisperCPP {
 }
 
 pub async fn new(model: &Path, prompt: &str) -> Result<WhisperCPP, String> {
-    let ctx = WhisperContext::new_with_params(
-        model.to_str().unwrap(),
-        WhisperContextParameters::default(),
-    )
-    .map_err(|e| {
+    let params = WhisperContextParameters::default();
+    log::info!(
+        "Initializing whisper context: model={}, use_gpu={}, gpu_device={}, flash_attn={}",
+        model.display(),
+        params.use_gpu,
+        params.gpu_device,
+        params.flash_attn
+    );
+    let ctx = WhisperContext::new_with_params(model.to_str().unwrap(), params).map_err(|e| {
         log::error!("Create whisper context failed: {e}");
         e.to_string()
     })?;
