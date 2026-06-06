@@ -99,6 +99,7 @@ impl EventEmitter {
                             DanmuEntry {
                                 ts: *ts,
                                 content: content.clone(),
+                                render_emotes: true,
                             },
                         )
                         .unwrap();

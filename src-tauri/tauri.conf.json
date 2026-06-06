@@ -14,6 +14,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": {
+      "../public/danmaku-emotes": "danmaku-emotes"
+    },
     "targets": "all"
   },
   "productName": "bili-shadowreplay",
@@ -30,6 +33,7 @@
     }
   },
   "app": {
+    "macOSPrivateApi": true,
     "withGlobalTauri": false,
     "security": {
       "assetProtocol": {

@@ -1,6 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bilibili_danmaku;
 mod config;
 mod constants;
 mod danmu2ass;
@@ -624,12 +625,70 @@ fn setup_plugins(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::W
 #[cfg(feature = "gui")]
 fn setup_event_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     builder.on_window_event(|window, event| {
-        if let WindowEvent::CloseRequested { api, .. } = event {
-            // main window is not closable
-            if window.label() == "main" {
-                window.hide().unwrap();
-                api.prevent_close();
+        match event {
+            WindowEvent::CloseRequested { api, .. } => {
+                // main window is not closable
+                if window.label() == "main" {
+                    // When the window is in fullscreen, exit it first; otherwise macOS keeps an empty fullscreen space.
+                    if let Ok(true) = window.is_fullscreen() {
+                        window.set_fullscreen(false).unwrap();
+                    } else {
+                        window.hide().unwrap();
+                    }
+                    api.prevent_close();
+                } else if let Some(webview_window) =
+                    window.app_handle().get_webview_window(window.label())
+                {
+                    crate::handlers::macos_native_player::cleanup_macos_native_players_for_window(
+                        &webview_window,
+                    );
+                }
             }
+            WindowEvent::Focused(false) => {
+                if window.label().starts_with("Clip:") {
+                    let label = window.label().to_string();
+                    let app_handle = window.app_handle().clone();
+                    for delay_ms in [0_u64, 120, 320, 640] {
+                        let app_handle = app_handle.clone();
+                        let label = label.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if delay_ms > 0 {
+                                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                            }
+                            if let Some(webview_window) = app_handle.get_webview_window(&label) {
+                                crate::handlers::macos_native_player::sync_macos_native_player_dock_preview_for_window(
+                                    &webview_window,
+                                    "clip-preview",
+                                    true,
+                                );
+                            }
+                        });
+                    }
+                }
+            }
+            WindowEvent::Focused(true) => {
+                if window.label().starts_with("Clip:") {
+                    let label = window.label().to_string();
+                    let app_handle = window.app_handle().clone();
+                    for delay_ms in [0_u64, 120, 320, 640] {
+                        let app_handle = app_handle.clone();
+                        let label = label.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if delay_ms > 0 {
+                                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                            }
+                            if let Some(webview_window) = app_handle.get_webview_window(&label) {
+                                crate::handlers::macos_native_player::sync_macos_native_player_dock_preview_for_window(
+                                    &webview_window,
+                                    "clip-preview",
+                                    false,
+                                );
+                            }
+                        });
+                    }
+                }
+            }
+            _ => {}
         }
     })
 }
@@ -655,12 +714,19 @@ fn setup_invoke_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         crate::handlers::config::update_subtitle_generator_type,
         crate::handlers::config::update_openai_api_key,
         crate::handlers::config::update_openai_api_endpoint,
+        crate::handlers::config::update_online_asr_model,
+        crate::handlers::config::update_oss_setting,
+        crate::handlers::config::update_asr_hotwords,
+        crate::handlers::config::sync_asr_hotwords,
         crate::handlers::config::update_auto_generate,
         crate::handlers::config::update_status_check_interval,
         crate::handlers::config::update_whisper_language,
         crate::handlers::config::update_webhook_url,
         crate::handlers::config::update_danmu_ass_options,
         crate::handlers::config::update_powerlive_key,
+        crate::handlers::config::update_use_native_clip_player,
+        crate::handlers::config::update_use_seekbar_thumbnail_cache,
+        crate::handlers::config::update_native_clip_player_windowed_offset,
         crate::handlers::message::get_messages,
         crate::handlers::message::read_message,
         crate::handlers::message::delete_message,
@@ -697,16 +763,25 @@ fn setup_invoke_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         crate::handlers::video::update_video_cover,
         crate::handlers::video::generate_video_subtitle,
         crate::handlers::video::get_video_subtitle,
+        crate::handlers::video::get_video_danmu,
+        crate::handlers::video::get_video_pbp,
         crate::handlers::video::update_video_subtitle,
         crate::handlers::video::update_video_note,
         crate::handlers::video::encode_video_subtitle,
+        crate::handlers::video::encode_video_media,
         crate::handlers::video::generic_ffmpeg_command,
         crate::handlers::video::import_external_video,
+        crate::handlers::video::download_video_danmu,
         crate::handlers::video::batch_import_external_videos,
         crate::handlers::video::clip_video,
         crate::handlers::video::get_file_size,
         crate::handlers::video::get_import_progress,
         crate::handlers::video::generate_audio_sample,
+        crate::handlers::video::generate_audio_waveform,
+        crate::handlers::video::enqueue_seekbar_thumbnail_cache_task,
+        crate::handlers::video::has_seekbar_thumbnail_cache,
+        crate::handlers::video::generate_seekbar_thumbnail_cache,
+        crate::handlers::video::generate_seekbar_thumbnail,
         crate::handlers::task::get_tasks,
         crate::handlers::task::delete_task,
         crate::handlers::utils::show_in_folder,
@@ -725,6 +800,21 @@ fn setup_invoke_handlers(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<
         crate::handlers::video_editing::search_danmu_keywords,
         crate::handlers::video_editing::merge_videos,
         crate::handlers::video_editing::extract_video_audio,
+        crate::handlers::utils::get_danmaku_emote_files,
+        crate::handlers::macos_native_player::macos_native_player_supported,
+        crate::handlers::macos_native_player::macos_native_player_mount,
+        crate::handlers::macos_native_player::macos_native_player_update_bounds,
+        crate::handlers::macos_native_player::macos_native_player_set_visible,
+        crate::handlers::macos_native_player::macos_native_player_set_presentation_mode,
+        crate::handlers::macos_native_player::macos_native_player_set_host_window_inner_size_keep_top_left,
+        crate::handlers::macos_native_player::macos_native_player_focus_host,
+        crate::handlers::macos_native_player::macos_native_player_play,
+        crate::handlers::macos_native_player::macos_native_player_pause,
+        crate::handlers::macos_native_player::macos_native_player_seek,
+        crate::handlers::macos_native_player::macos_native_player_set_rate,
+        crate::handlers::macos_native_player::macos_native_player_set_volume,
+        crate::handlers::macos_native_player::macos_native_player_get_state,
+        crate::handlers::macos_native_player::macos_native_player_unmount,
     ])
 }
 
@@ -778,14 +868,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .build(tauri::generate_context!())?
         .run(|app_handle: &tauri::AppHandle, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event {
-                // stop all recorders
-                let recorder_manager = app_handle.state::<State>().recorder_manager.clone();
-                log::info!("Stopping all recorders...");
-                tauri::async_runtime::block_on(async move {
-                    recorder_manager.stop_all().await;
-                });
-                log::info!("All recorders stopped successfully.");
+            match event {
+                tauri::RunEvent::ExitRequested { .. } => {
+                    // stop all recorders
+                    let recorder_manager = app_handle.state::<State>().recorder_manager.clone();
+                    log::info!("Stopping all recorders...");
+                    tauri::async_runtime::block_on(async move {
+                        recorder_manager.stop_all().await;
+                    });
+                    log::info!("All recorders stopped successfully.");
+                }
+                #[cfg(target_os = "macos")]
+                tauri::RunEvent::Reopen { .. } => {
+                    let _ = app_handle.show();
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.unminimize();
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+                _ => {}
             }
         });
 

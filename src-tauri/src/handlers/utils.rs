@@ -265,26 +265,34 @@ pub async fn open_live(
 #[tauri::command]
 pub async fn open_clip(state: state_type!(), video_id: i64) -> Result<(), String> {
     log::info!("Open clip window: {video_id}");
+    let label = format!("Clip:{video_id}");
+
+    if let Some(window) = state.app_handle.get_webview_window(&label) {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
     let builder = tauri::WebviewWindowBuilder::new(
         &state.app_handle,
-        format!("Clip:{video_id}"),
+        label,
         tauri::WebviewUrl::App(format!("index_clip.html?id={video_id}").into()),
     )
     .title(format!("Clip window:{video_id}"))
+    .transparent(true)
     .theme(Some(Theme::Light))
-    .inner_size(1200.0, 800.0)
-    .effects(WindowEffectsConfig {
-        effects: vec![
-            tauri_utils::WindowEffect::Tabbed,
-            tauri_utils::WindowEffect::Mica,
-        ],
-        state: None,
-        radius: None,
-        color: None,
-    });
+    .inner_size(1200.0, 740.0);
 
-    if let Err(e) = builder.decorations(true).build() {
-        log::error!("clip window build failed: {e}");
+    match builder.decorations(true).build() {
+        Ok(window) => {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+        Err(e) => {
+            log::error!("clip window build failed: {e}");
+        }
     }
 
     Ok(())
@@ -300,6 +308,45 @@ pub async fn list_folder(_state: state_type!(), path: String) -> Result<Vec<Stri
     let mut files = Vec::new();
     for entry in entries.unwrap().flatten() {
         files.push(entry.path().to_str().unwrap().to_string());
+    }
+    Ok(files)
+}
+
+#[cfg_attr(feature = "gui", tauri::command)]
+pub async fn get_danmaku_emote_files(state: state_type!()) -> Result<Vec<String>, String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    #[cfg(feature = "gui")]
+    {
+        if let Ok(resource_dir) = state.app_handle.path().resource_dir() {
+            candidates.push(resource_dir.join("danmaku-emotes"));
+        }
+    }
+
+    let cwd = std::env::current_dir().map_err(|e| format!("Get current dir failed: {e}"))?;
+    candidates.push(cwd.join("public").join("danmaku-emotes"));
+    candidates.push(cwd.join("dist").join("danmaku-emotes"));
+    if let Some(parent) = cwd.parent() {
+        candidates.push(parent.join("public").join("danmaku-emotes"));
+        candidates.push(parent.join("dist").join("danmaku-emotes"));
+    }
+
+    let dir = candidates
+        .into_iter()
+        .find(|candidate| candidate.is_dir())
+        .ok_or_else(|| "Danmaku emote directory not found".to_string())?;
+
+    let entries = std::fs::read_dir(&dir).map_err(|e| {
+        format!(
+            "Read danmaku emote directory failed ({}): {e}",
+            dir.display()
+        )
+    })?;
+    let mut files = Vec::new();
+    for entry in entries.flatten() {
+        if entry.file_type().map(|ty| ty.is_file()).unwrap_or(false) {
+            files.push(entry.path().to_string_lossy().to_string());
+        }
     }
     Ok(files)
 }

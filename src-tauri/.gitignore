@@ -7,3 +7,4 @@ tmps
 clips
 data
 config.toml
+!.cargo/config.toml

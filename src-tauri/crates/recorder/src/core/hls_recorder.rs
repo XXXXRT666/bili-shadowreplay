@@ -172,6 +172,7 @@ impl HlsRecorder {
 
     async fn query_playlist(&self, stream: &HlsStream) -> Result<Playlist, RecorderError> {
         let url = stream.index();
+        log::info!("Fetching playlist from URL: {}", url);
         let response = self
             .client
             .get(url)
@@ -179,6 +180,11 @@ impl HlsRecorder {
             .send()
             .await?;
         let bytes = response.bytes().await?;
+        log::info!("{}", String::from_utf8(bytes.to_vec()).unwrap());
+        log::info!(
+            "Fetched playlist content: {}",
+            String::from_utf8_lossy(&bytes)
+        );
         let (_, playlist) =
             m3u8_rs::parse_playlist(&bytes).map_err(|_| RecorderError::M3u8ParseFailed {
                 content: String::from_utf8(bytes.to_vec()).unwrap(),

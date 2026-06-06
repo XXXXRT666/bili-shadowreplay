@@ -3,6 +3,7 @@ use std::{
     path::PathBuf,
 };
 
+use crate::config::AsrHotwordConfig;
 use crate::{
     config::Config,
     constants::API_PORT,
@@ -15,11 +16,13 @@ use crate::{
             add_account, get_account_count, get_accounts, get_qr, get_qr_status, remove_account,
         },
         config::{
-            get_config, get_static_port, update_auto_generate, update_clip_name_format,
-            update_danmu_ass_options, update_notify, update_openai_api_endpoint,
-            update_openai_api_key, update_status_check_interval, update_subtitle_generator_type,
-            update_subtitle_setting, update_webhook_url, update_whisper_language,
-            update_whisper_model, update_whisper_prompt,
+            get_config, get_static_port, sync_asr_hotwords, update_asr_hotwords,
+            update_auto_generate, update_clip_name_format, update_danmu_ass_options,
+            update_native_clip_player_windowed_offset, update_notify, update_online_asr_model,
+            update_openai_api_endpoint, update_openai_api_key, update_oss_setting,
+            update_status_check_interval, update_subtitle_generator_type, update_subtitle_setting,
+            update_use_native_clip_player, update_use_seekbar_thumbnail_cache, update_webhook_url,
+            update_whisper_language, update_whisper_model, update_whisper_prompt,
         },
         message::{delete_message, get_messages, read_message},
         recorder::{
@@ -30,14 +33,19 @@ use crate::{
             get_total_length, remove_recorder, send_danmaku, set_enable, ExportDanmuOptions,
         },
         task::{delete_task, get_tasks},
-        utils::{console_log, get_disk_info, list_folder, sanitize_filename_advanced, DiskInfo},
+        utils::{
+            console_log, get_danmaku_emote_files, get_disk_info, list_folder,
+            sanitize_filename_advanced, DiskInfo,
+        },
         video::{
             batch_import_external_videos, cancel, clip_range, clip_video, delete_video,
-            encode_video_subtitle, generate_audio_sample, generate_video_subtitle,
-            generic_ffmpeg_command, get_all_videos, get_file_size, get_import_progress, get_video,
-            get_video_cover, get_video_subtitle, get_video_typelist, get_videos,
-            import_external_video, update_video_cover, update_video_note, update_video_subtitle,
-            upload_procedure,
+            download_video_danmu, encode_video_media, encode_video_subtitle,
+            enqueue_seekbar_thumbnail_cache_task, generate_audio_sample, generate_audio_waveform,
+            generate_seekbar_thumbnail_cache, generate_video_subtitle, generic_ffmpeg_command,
+            get_all_videos, get_file_size, get_import_progress, get_video, get_video_cover,
+            get_video_danmu, get_video_pbp, get_video_subtitle, get_video_typelist, get_videos,
+            has_seekbar_thumbnail_cache, import_external_video, update_video_cover,
+            update_video_note, update_video_subtitle, upload_procedure,
         },
         AccountInfo,
     },
@@ -203,6 +211,13 @@ async fn handler_get_static_port(
         .await
         .expect("Failed to get static port");
     Ok(Json(ApiResponse::success(static_port)))
+}
+
+async fn handler_get_danmaku_emote_files(
+    state: axum::extract::State<State>,
+) -> Result<Json<ApiResponse<Vec<String>>>, ApiError> {
+    let files = get_danmaku_emote_files(state.0).await?;
+    Ok(Json(ApiResponse::success(files)))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -388,6 +403,72 @@ async fn handler_update_openai_api_key(
         .await
         .expect("Failed to update openai api key");
     Ok(Json(ApiResponse::success(())))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateOnlineAsrModelRequest {
+    online_asr_model: String,
+}
+
+async fn handler_update_online_asr_model(
+    state: axum::extract::State<State>,
+    Json(param): Json<UpdateOnlineAsrModelRequest>,
+) -> Result<Json<ApiResponse<()>>, ApiError> {
+    update_online_asr_model(state.0, param.online_asr_model)
+        .await
+        .expect("Failed to update online asr model");
+    Ok(Json(ApiResponse::success(())))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateOssSettingRequest {
+    oss_access_key_id: String,
+    oss_access_key_secret: String,
+    oss_bucket: String,
+    oss_endpoint: String,
+    oss_object_prefix: String,
+}
+
+async fn handler_update_oss_setting(
+    state: axum::extract::State<State>,
+    Json(param): Json<UpdateOssSettingRequest>,
+) -> Result<Json<ApiResponse<()>>, ApiError> {
+    update_oss_setting(
+        state.0,
+        param.oss_access_key_id,
+        param.oss_access_key_secret,
+        param.oss_bucket,
+        param.oss_endpoint,
+        param.oss_object_prefix,
+    )
+    .await
+    .expect("Failed to update OSS setting");
+    Ok(Json(ApiResponse::success(())))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateAsrHotwordsRequest {
+    asr_hotwords: AsrHotwordConfig,
+}
+
+async fn handler_update_asr_hotwords(
+    state: axum::extract::State<State>,
+    Json(param): Json<UpdateAsrHotwordsRequest>,
+) -> Result<Json<ApiResponse<()>>, ApiError> {
+    update_asr_hotwords(state.0, param.asr_hotwords)
+        .await
+        .expect("Failed to update ASR hotwords");
+    Ok(Json(ApiResponse::success(())))
+}
+
+async fn handler_sync_asr_hotwords(
+    state: axum::extract::State<State>,
+) -> Result<Json<ApiResponse<AsrHotwordConfig>>, ApiError> {
+    let synced = sync_asr_hotwords(state.0).await?;
+    Ok(Json(ApiResponse::success(synced)))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -772,6 +853,38 @@ async fn handler_generate_audio_sample(
     Ok(Json(ApiResponse::success(())))
 }
 
+async fn handler_generate_audio_waveform(
+    state: axum::extract::State<State>,
+    Json(param): Json<GenerateAudioSampleRequest>,
+) -> Result<Json<ApiResponse<crate::ffmpeg::AudioWaveformData>>, ApiError> {
+    let waveform = generate_audio_waveform(state.0, param.video_id).await?;
+    Ok(Json(ApiResponse::success(waveform)))
+}
+
+async fn handler_enqueue_seekbar_thumbnail_cache_task(
+    state: axum::extract::State<State>,
+    Json(param): Json<GenerateAudioSampleRequest>,
+) -> Result<Json<ApiResponse<Option<TaskRow>>>, ApiError> {
+    let task = enqueue_seekbar_thumbnail_cache_task(state.0, param.video_id).await?;
+    Ok(Json(ApiResponse::success(task)))
+}
+
+async fn handler_has_seekbar_thumbnail_cache(
+    state: axum::extract::State<State>,
+    Json(param): Json<GenerateAudioSampleRequest>,
+) -> Result<Json<ApiResponse<bool>>, ApiError> {
+    let exists = has_seekbar_thumbnail_cache(state.0, param.video_id).await?;
+    Ok(Json(ApiResponse::success(exists)))
+}
+
+async fn handler_generate_seekbar_thumbnail_cache(
+    state: axum::extract::State<State>,
+    Json(param): Json<GenerateAudioSampleRequest>,
+) -> Result<Json<ApiResponse<()>>, ApiError> {
+    generate_seekbar_thumbnail_cache(state.0, param.video_id).await?;
+    Ok(Json(ApiResponse::success(())))
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GetVideosRequest {
@@ -924,6 +1037,22 @@ async fn handler_get_video_subtitle(
     Ok(Json(ApiResponse::success(video_subtitle)))
 }
 
+async fn handler_get_video_danmu(
+    state: axum::extract::State<State>,
+    Json(param): Json<GetVideoSubtitleRequest>,
+) -> Result<Json<ApiResponse<Vec<DanmuEntry>>>, ApiError> {
+    let video_danmu = get_video_danmu(state.0, param.id).await?;
+    Ok(Json(ApiResponse::success(video_danmu)))
+}
+
+async fn handler_get_video_pbp(
+    state: axum::extract::State<State>,
+    Json(param): Json<GetVideoSubtitleRequest>,
+) -> Result<Json<ApiResponse<Option<crate::bilibili_danmaku::ImportedVideoPbpData>>>, ApiError> {
+    let video_pbp = get_video_pbp(state.0, param.id).await?;
+    Ok(Json(ApiResponse::success(video_pbp)))
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UpdateVideoSubtitleRequest {
@@ -962,6 +1091,20 @@ struct EncodeVideoSubtitleRequest {
     srt_style: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EncodeVideoMediaRequest {
+    event_id: String,
+    id: i64,
+    include_subtitle: bool,
+    include_danmu: bool,
+    #[serde(default = "default_true")]
+    render_danmu_emotes: bool,
+    srt_style: String,
+    #[serde(default)]
+    danmu_render_options: Option<crate::danmu2ass::DanmuRenderOptions>,
+}
+
 async fn handler_encode_video_subtitle(
     state: axum::extract::State<State>,
     Json(encode_video_subtitle_param): Json<EncodeVideoSubtitleRequest>,
@@ -978,6 +1121,24 @@ async fn handler_encode_video_subtitle(
     )))
 }
 
+async fn handler_encode_video_media(
+    state: axum::extract::State<State>,
+    Json(param): Json<EncodeVideoMediaRequest>,
+) -> Result<Json<ApiResponse<String>>, ApiError> {
+    encode_video_media(
+        state.0,
+        param.event_id.clone(),
+        param.id,
+        param.include_subtitle,
+        param.include_danmu,
+        param.render_danmu_emotes,
+        param.srt_style,
+        param.danmu_render_options,
+    )
+    .await?;
+    Ok(Json(ApiResponse::success(param.event_id)))
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ImportExternalVideoRequest {
@@ -990,8 +1151,8 @@ struct ImportExternalVideoRequest {
 async fn handler_import_external_video(
     state: axum::extract::State<State>,
     Json(param): Json<ImportExternalVideoRequest>,
-) -> Result<Json<ApiResponse<String>>, ApiError> {
-    import_external_video(
+) -> Result<Json<ApiResponse<VideoRow>>, ApiError> {
+    let video = import_external_video(
         state.0,
         param.event_id.clone(),
         param.file_path.clone(),
@@ -999,7 +1160,31 @@ async fn handler_import_external_video(
         param.room_id,
     )
     .await?;
-    Ok(Json(ApiResponse::success(param.event_id)))
+    Ok(Json(ApiResponse::success(video)))
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadVideoDanmuRequest {
+    event_id: String,
+    video_id: i64,
+    bvid: String,
+    page: i32,
+}
+
+async fn handler_download_video_danmu(
+    state: axum::extract::State<State>,
+    Json(param): Json<DownloadVideoDanmuRequest>,
+) -> Result<Json<ApiResponse<crate::bilibili_danmaku::ImportedVideoDanmuDownload>>, ApiError> {
+    let result = download_video_danmu(
+        state.0,
+        param.event_id,
+        param.video_id,
+        param.bvid,
+        param.page,
+    )
+    .await?;
+    Ok(Json(ApiResponse::success(result)))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1007,9 +1192,22 @@ async fn handler_import_external_video(
 struct ClipVideoRequest {
     event_id: String,
     parent_video_id: i64,
-    start_time: f64,
-    end_time: f64,
+    ranges: Vec<crate::ffmpeg::Range>,
+    merge_ranges: bool,
     clip_title: String,
+    #[serde(default)]
+    include_subtitle: bool,
+    include_danmu: bool,
+    #[serde(default = "default_true")]
+    render_danmu_emotes: bool,
+    #[serde(default)]
+    srt_style: String,
+    #[serde(default)]
+    danmu_render_options: Option<crate::danmu2ass::DanmuRenderOptions>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 async fn handler_clip_video(
@@ -1020,9 +1218,14 @@ async fn handler_clip_video(
         state.0,
         param.event_id.clone(),
         param.parent_video_id,
-        param.start_time,
-        param.end_time,
+        param.ranges,
+        param.merge_ranges,
         param.clip_title,
+        param.include_subtitle,
+        param.include_danmu,
+        param.render_danmu_emotes,
+        param.srt_style,
+        param.danmu_render_options,
     )
     .await?;
     Ok(Json(ApiResponse::success(param.event_id)))
@@ -1078,6 +1281,52 @@ async fn handler_update_danmu_ass_options(
     Json(param): Json<UpdateDanmuAssOptionsRequest>,
 ) -> Result<Json<ApiResponse<()>>, ApiError> {
     let _ = update_danmu_ass_options(state.0, param.font_size, param.opacity).await;
+    Ok(Json(ApiResponse::success(())))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateUseNativeClipPlayerRequest {
+    use_native_clip_player: bool,
+}
+
+async fn handler_update_use_native_clip_player(
+    state: axum::extract::State<State>,
+    Json(param): Json<UpdateUseNativeClipPlayerRequest>,
+) -> Result<Json<ApiResponse<()>>, ApiError> {
+    let _ = update_use_native_clip_player(state.0, param.use_native_clip_player).await;
+    Ok(Json(ApiResponse::success(())))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateUseSeekbarThumbnailCacheRequest {
+    use_seekbar_thumbnail_cache: bool,
+}
+
+async fn handler_update_use_seekbar_thumbnail_cache(
+    state: axum::extract::State<State>,
+    Json(param): Json<UpdateUseSeekbarThumbnailCacheRequest>,
+) -> Result<Json<ApiResponse<()>>, ApiError> {
+    let _ = update_use_seekbar_thumbnail_cache(state.0, param.use_seekbar_thumbnail_cache).await;
+    Ok(Json(ApiResponse::success(())))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateNativeClipPlayerWindowedOffsetRequest {
+    native_clip_player_windowed_offset: i32,
+}
+
+async fn handler_update_native_clip_player_windowed_offset(
+    state: axum::extract::State<State>,
+    Json(param): Json<UpdateNativeClipPlayerWindowedOffsetRequest>,
+) -> Result<Json<ApiResponse<()>>, ApiError> {
+    let _ = update_native_clip_player_windowed_offset(
+        state.0,
+        param.native_clip_player_windowed_offset,
+    )
+    .await;
     Ok(Json(ApiResponse::success(())))
 }
 
@@ -1743,9 +1992,14 @@ pub async fn start_api_server(state: State) {
                 "/api/encode_video_subtitle",
                 post(handler_encode_video_subtitle),
             )
+            .route("/api/encode_video_media", post(handler_encode_video_media))
             .route(
                 "/api/import_external_video",
                 post(handler_import_external_video),
+            )
+            .route(
+                "/api/download_video_danmu",
+                post(handler_download_video_danmu),
             )
             .route("/api/clip_video", post(handler_clip_video))
             .route(
@@ -1774,6 +2028,16 @@ pub async fn start_api_server(state: State) {
                 post(handler_update_openai_api_key),
             )
             .route(
+                "/api/update_online_asr_model",
+                post(handler_update_online_asr_model),
+            )
+            .route("/api/update_oss_setting", post(handler_update_oss_setting))
+            .route(
+                "/api/update_asr_hotwords",
+                post(handler_update_asr_hotwords),
+            )
+            .route("/api/sync_asr_hotwords", post(handler_sync_asr_hotwords))
+            .route(
                 "/api/update_auto_generate",
                 post(handler_update_auto_generate),
             )
@@ -1785,6 +2049,18 @@ pub async fn start_api_server(state: State) {
             .route(
                 "/api/update_danmu_ass_options",
                 post(handler_update_danmu_ass_options),
+            )
+            .route(
+                "/api/update_use_native_clip_player",
+                post(handler_update_use_native_clip_player),
+            )
+            .route(
+                "/api/update_use_seekbar_thumbnail_cache",
+                post(handler_update_use_seekbar_thumbnail_cache),
+            )
+            .route(
+                "/api/update_native_clip_player_windowed_offset",
+                post(handler_update_native_clip_player_windowed_offset),
             )
             .route(
                 "/api/batch_import_external_videos",
@@ -1807,6 +2083,10 @@ pub async fn start_api_server(state: State) {
         // Config commands
         .route("/api/get_config", post(handler_get_config))
         .route("/api/get_static_port", post(handler_get_static_port))
+        .route(
+            "/api/get_danmaku_emote_files",
+            post(handler_get_danmaku_emote_files),
+        )
         // Message commands
         .route("/api/get_messages", post(handler_get_messages))
         .route("/api/read_message", post(handler_read_message))
@@ -1842,11 +2122,29 @@ pub async fn start_api_server(state: State) {
             "/api/generate_audio_sample",
             post(handler_generate_audio_sample),
         )
+        .route(
+            "/api/generate_audio_waveform",
+            post(handler_generate_audio_waveform),
+        )
+        .route(
+            "/api/enqueue_seekbar_thumbnail_cache_task",
+            post(handler_enqueue_seekbar_thumbnail_cache_task),
+        )
+        .route(
+            "/api/has_seekbar_thumbnail_cache",
+            post(handler_has_seekbar_thumbnail_cache),
+        )
+        .route(
+            "/api/generate_seekbar_thumbnail_cache",
+            post(handler_generate_seekbar_thumbnail_cache),
+        )
         .route("/api/get_videos", post(handler_get_videos))
         .route("/api/get_video_cover", post(handler_get_video_cover))
         .route("/api/get_all_videos", post(handler_get_all_videos))
         .route("/api/get_video_typelist", post(handler_get_video_typelist))
         .route("/api/get_video_subtitle", post(handler_get_video_subtitle))
+        .route("/api/get_video_danmu", post(handler_get_video_danmu))
+        .route("/api/get_video_pbp", post(handler_get_video_pbp))
         .route("/api/get_file_size", post(handler_get_file_size))
         .route("/api/delete_task", post(handler_delete_task))
         .route("/api/get_tasks", post(handler_get_tasks))

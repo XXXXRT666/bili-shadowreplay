@@ -39,3 +39,5 @@ docs/.vitepress/dist
 *.debug.map
 
 .cargo
+!src-tauri/.cargo/
+!src-tauri/.cargo/config.toml
