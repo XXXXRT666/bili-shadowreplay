@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke, get_static_url } from "../lib/invoker";
   import type { RecordItem } from "../lib/db";
+  import type { VideoItem } from "../lib/interface";
   import { onMount } from "svelte";
   import {
     Play,
@@ -16,6 +17,7 @@
     Home,
     FileVideo,
     History,
+    Upload,
   } from "lucide-svelte";
   import BilibiliIcon from "../lib/components/BilibiliIcon.svelte";
   import DouyinIcon from "../lib/components/DouyinIcon.svelte";
@@ -24,9 +26,14 @@
   import TikTokIcon from "../lib/components/TikTokIcon.svelte";
   import GenerateWholeClipModal from "../lib/components/GenerateWholeClipModal.svelte";
   import type { RecorderInfo, RecorderList } from "src/lib/interface";
+  import ImportVideoDialog from "../lib/components/ImportVideoDialog.svelte";
 
-  let archives: RecordItem[] = [];
-  let filteredArchives: RecordItem[] = [];
+  type ArchiveListItem = RecordItem & {
+    importedVideoId?: number;
+  };
+
+  let archives: ArchiveListItem[] = [];
+  let filteredArchives: ArchiveListItem[] = [];
   let loading = false;
   let sortBy = "created_at";
   let sortOrder = "desc";
@@ -40,7 +47,8 @@
 
   let selectedArchives: Set<string> = new Set();
   let showDeleteConfirm = false;
-  let archiveToDelete: RecordItem | null = null;
+  let archiveToDelete: ArchiveListItem | null = null;
+  let showImportDialog = false;
 
   // 生成完整录播相关状态
   let showWholeClipModal = false;
@@ -58,7 +66,7 @@
   const pageSizeOptions = [10, 20, 50, 100];
 
   // 所有数据缓存
-  let allArchives = [];
+  let allArchives: ArchiveListItem[] = [];
   let allRooms: RecorderInfo[] = [];
 
   onMount(async () => {
@@ -122,6 +130,40 @@
           console.warn(`Failed to load archives for room ${room}:`, error);
         }
       }
+
+      const importedVideos = await invoke<VideoItem[]>("get_all_videos");
+      const importedArchives: ArchiveListItem[] = [];
+      const roomOptionIds = new Set(roomOptions.map((room) => room.id));
+      for (const video of importedVideos) {
+        if (video.platform !== "imported") {
+          continue;
+        }
+
+        importedArchives.push({
+          platform: "imported",
+          title: video.title || video.file,
+          parent_id: "",
+          live_id: `imported-video-${video.id}`,
+          room_id: video.room_id,
+          length: video.length,
+          size: video.size,
+          created_at: video.created_at,
+          cover: video.cover ? await get_static_url("output", video.cover) : "",
+          importedVideoId: video.id,
+        });
+
+        if (!roomOptionIds.has(video.room_id)) {
+          roomOptionIds.add(video.room_id);
+          roomOptions = [
+            ...roomOptions,
+            {
+              id: video.room_id,
+              label: `${video.room_id}（导入）`,
+            },
+          ].sort((a, b) => a.label.localeCompare(b.label));
+        }
+      }
+      allArchives = [...allArchives, ...importedArchives];
 
       // 按创建时间排序
       allArchives.sort((a, b) => {
@@ -195,7 +237,7 @@
   }
 
   function applyFilters() {
-    let filtered: RecordItem[] = [...allArchives];
+    let filtered: ArchiveListItem[] = [...allArchives];
 
     // Apply room filter
     if (selectedRoomId !== null) {
@@ -295,6 +337,8 @@
 
   function formatPlatform(platform: string) {
     switch (platform.toLowerCase()) {
+      case "imported":
+        return "导入录播";
       case "bilibili":
         return "B站";
       case "douyin":
@@ -341,7 +385,7 @@
     return ((size * 8) / duration / 1024).toFixed(0);
   }
 
-  function getArchiveKey(archive: RecordItem) {
+  function getArchiveKey(archive: ArchiveListItem) {
     return `${archive.platform}-${archive.room_id}-${archive.parent_id}-${archive.live_id}`;
   }
 
@@ -376,13 +420,17 @@
     selectedArchives = selectedArchives; // Trigger reactivity
   }
 
-  async function deleteArchive(archive: RecordItem) {
+  async function deleteArchive(archive: ArchiveListItem) {
     try {
-      await invoke("delete_archive", {
-        platform: archive.platform,
-        roomId: archive.room_id,
-        liveId: archive.live_id,
-      });
+      if (archive.importedVideoId !== undefined) {
+        await invoke("delete_video", { id: archive.importedVideoId });
+      } else {
+        await invoke("delete_archive", {
+          platform: archive.platform,
+          roomId: archive.room_id,
+          liveId: archive.live_id,
+        });
+      }
       await loadArchives();
       showDeleteConfirm = false;
       archiveToDelete = null;
@@ -396,11 +444,15 @@
       for (const liveId of selectedArchives) {
         const archive = filteredArchives.find((a) => a.live_id === liveId);
         if (archive) {
-          await invoke("delete_archive", {
-            platform: archive.platform,
-            roomId: archive.room_id,
-            liveId: archive.live_id,
-          });
+          if (archive.importedVideoId !== undefined) {
+            await invoke("delete_video", { id: archive.importedVideoId });
+          } else {
+            await invoke("delete_archive", {
+              platform: archive.platform,
+              roomId: archive.room_id,
+              liveId: archive.live_id,
+            });
+          }
         }
       }
       selectedArchives.clear();
@@ -412,19 +464,26 @@
     }
   }
 
-  async function playArchive(archive: RecordItem) {
+  async function playArchive(archive: ArchiveListItem) {
     try {
-      await invoke("open_live", {
-        platform: archive.platform,
-        roomId: archive.room_id,
-        liveId: archive.live_id,
-      });
+      if (archive.importedVideoId !== undefined) {
+        await invoke("open_clip", { videoId: archive.importedVideoId });
+      } else {
+        await invoke("open_live", {
+          platform: archive.platform,
+          roomId: archive.room_id,
+          liveId: archive.live_id,
+        });
+      }
     } catch (error) {
       console.error("Failed to play archive:", error);
     }
   }
 
-  function openWholeClipModal(archive: RecordItem) {
+  function openWholeClipModal(archive: ArchiveListItem) {
+    if (archive.importedVideoId !== undefined) {
+      return;
+    }
     wholeClipArchive = archive;
     showWholeClipModal = true;
   }
@@ -432,6 +491,10 @@
   function handleWholeClipGenerated() {
     // 生成完成后可以刷新列表或显示通知
     console.log("完整录播生成已开始");
+  }
+
+  function handleArchiveImported() {
+    loadArchives();
   }
 </script>
 
@@ -449,6 +512,13 @@
       </div>
 
       <div class="flex items-center space-x-3">
+        <button
+          class="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors flex items-center space-x-2"
+          on:click={() => (showImportDialog = true)}
+        >
+          <Upload class="w-4 h-4 text-white" />
+          <span>导入录播</span>
+        </button>
         <button
           class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
           on:click={loadArchives}
@@ -784,7 +854,9 @@
 
                   <td class="px-4 py-3">
                     <div class="flex items-center space-x-2">
-                      {#if archive.platform === "bilibili"}
+                      {#if archive.importedVideoId !== undefined}
+                        <FileVideo class="w-4 h-4 text-gray-400" />
+                      {:else if archive.platform === "bilibili"}
                         <BilibiliIcon class="w-4 h-4" />
                       {:else if archive.platform === "douyin"}
                         <DouyinIcon class="w-4 h-4" />
@@ -864,13 +936,15 @@
                       >
                         <Play class="w-4 h-4 text-blue-500" />
                       </button>
-                      <button
-                        class="p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors"
-                        title="生成完整切片"
-                        on:click={() => openWholeClipModal(archive)}
-                      >
-                        <FileVideo class="w-4 h-4 text-blue-500" />
-                      </button>
+                      {#if archive.importedVideoId === undefined}
+                        <button
+                          class="p-1.5 rounded-lg hover:bg-blue-500/10 transition-colors"
+                          title="生成完整切片"
+                          on:click={() => openWholeClipModal(archive)}
+                        >
+                          <FileVideo class="w-4 h-4 text-blue-500" />
+                        </button>
+                      {/if}
                       <button
                         class="p-1.5 rounded-lg hover:bg-red-500/10 transition-colors"
                         title="删除记录"
@@ -950,6 +1024,12 @@
   roomId={wholeClipArchive?.room_id || ""}
   platform={wholeClipArchive?.platform || ""}
   on:generated={handleWholeClipGenerated}
+/>
+
+<ImportVideoDialog
+  bind:showDialog={showImportDialog}
+  roomId={selectedRoomId}
+  on:imported={handleArchiveImported}
 />
 
 <style>

@@ -156,6 +156,8 @@
         return "压制字幕";
       case "generate_whole_clip":
         return "生成完整录播";
+      case "generate_seekbar_thumbnail_cache":
+        return "提取预览图";
       default:
         return task_type;
     }
@@ -171,6 +173,8 @@
         return "bg-blue-500";
       case "encode_video_subtitle":
         return "bg-orange-500";
+      case "generate_seekbar_thumbnail_cache":
+        return "bg-cyan-500";
       default:
         return "bg-gray-500";
     }

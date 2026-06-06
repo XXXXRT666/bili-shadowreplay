@@ -3,7 +3,7 @@
   import { Upload, X, CheckCircle } from "lucide-svelte";
   import { createEventDispatcher, onDestroy } from "svelte";
   import { open } from "@tauri-apps/plugin-dialog";
-  import type { ProgressUpdate, ProgressFinished } from "../interface";
+  import type { Config, ProgressUpdate, ProgressFinished } from "../interface";
 
   export let showDialog = false;
   export let roomId: string | null = null;
@@ -15,6 +15,9 @@
   let selectedFileName: string = "";
   let selectedFileSize: number = 0;
   let videoTitle = "";
+  let enableDanmuDownload = false;
+  let danmuBvid = "";
+  let danmuPage = 1;
   let importing = false;
   let uploading = false;
   let uploadProgress = 0;
@@ -322,6 +325,9 @@
     selectedFilePath = filePath;
     selectedFileName = filePath.split(/[/\\]/).pop() || "";
     videoTitle = selectedFileName.replace(/\.[^/.]+$/, ""); // 去掉扩展名
+    enableDanmuDownload = false;
+    danmuBvid = "";
+    danmuPage = 1;
 
     if (fileSize !== undefined) {
       selectedFileSize = fileSize;
@@ -414,17 +420,95 @@
     currentFileIndex = 0;
   }
 
+  async function downloadDanmuForImportedVideo(videoId: number) {
+    if (!enableDanmuDownload) return;
+
+    const bvid = danmuBvid.trim();
+    if (!bvid) {
+      throw new Error("请输入 BV 号");
+    }
+
+    const page = Number.parseInt(String(danmuPage), 10);
+    if (!Number.isInteger(page) || page < 1) {
+      throw new Error("请输入大于等于 1 的分 P 号");
+    }
+
+    const eventId = "download_danmu_" + Date.now();
+    importProgress = "准备下载弹幕...";
+
+    const clearUpdateListener = await listen(`progress-update:${eventId}`, (e) => {
+      importProgress = e.payload.content;
+    });
+
+    const clearFinishedListener = await listen(
+      `progress-finished:${eventId}`,
+      (e) => {
+        if (!e.payload.success) {
+          importProgress = e.payload.message || "弹幕下载失败";
+        }
+      },
+    );
+
+    try {
+      await invoke("download_video_danmu", {
+        eventId,
+        videoId,
+        bvid,
+        page,
+      });
+    } finally {
+      clearUpdateListener();
+      clearFinishedListener();
+    }
+  }
+
+  async function generateWaveformForImportedVideo(videoId: number) {
+    await invoke("generate_audio_waveform", {
+      videoId,
+    });
+  }
+
+  async function enqueueSeekbarThumbnailCacheTaskForImportedVideo(videoId: number) {
+    await invoke("enqueue_seekbar_thumbnail_cache_task", {
+      videoId,
+    });
+  }
+
+  async function shouldGenerateSeekbarThumbnails() {
+    try {
+      const config = (await invoke("get_config")) as Config;
+      return Boolean(config?.use_seekbar_thumbnail_cache);
+    } catch (error) {
+      console.error("读取预览图设置失败:", error);
+      return true;
+    }
+  }
+
   async function startImport() {
     if (!selectedFilePath) return;
+    if (enableDanmuDownload) {
+      const bvid = danmuBvid.trim();
+      const page = Number.parseInt(String(danmuPage), 10);
+      if (!bvid) {
+        alert("请输入 BV 号");
+        return;
+      }
+      if (!Number.isInteger(page) || page < 1) {
+        alert("请输入大于等于 1 的分 P 号");
+        return;
+      }
+    }
 
     importing = true;
     importProgress = "准备导入...";
+    let clear_update_listener: (() => void) | null = null;
+    let clear_finished_listener: (() => void) | null = null;
 
     try {
       const eventId = "import_" + Date.now();
       currentImportEventId = eventId;
 
-      const clear_update_listener = await listen(
+      clear_update_listener = await listen(
         `progress-update:${eventId}`,
         (e) => {
           importProgress = e.payload.content;
@@ -436,46 +520,72 @@
           }
         },
       );
-      const clear_finished_listener = await listen(
+      clear_finished_listener = await listen(
         `progress-finished:${eventId}`,
         (e) => {
-          if (e.payload.success) {
-            // 导入成功，关闭对话框并刷新列表
-            showDialog = false;
-            selectedFilePath = null;
-            selectedFileName = "";
-            selectedFileSize = 0;
-            videoTitle = "";
-            resetBatchImportState();
-            dispatch("imported");
-          } else {
-            alert("导入失败: " + e.payload.message);
-            resetBatchImportState();
+          if (!e.payload.success && !importProgress) {
+            importProgress = e.payload.message || "导入失败";
           }
-          // 无论成功失败都要重置状态
-          importing = false;
-          currentImportEventId = null;
-          importProgress = "";
-
-          clear_update_listener();
-          clear_finished_listener();
         },
       );
 
-      await invoke("import_external_video", {
+      const importedVideo = (await invoke("import_external_video", {
         eventId: eventId,
         filePath: selectedFilePath,
         title: videoTitle,
         roomId: roomId || IMPORTED_VIDEO_ROOM,
-      });
+      })) as { id: number };
 
-      // 注意：成功处理移到了progressFinishedListener中
+      importProgress = enableDanmuDownload
+        ? "正在并行处理弹幕下载和音频波形..."
+        : "正在生成音频波形...";
+
+      if (await shouldGenerateSeekbarThumbnails()) {
+        // 预览图缓存改为后台任务，不阻塞导入流程
+        void enqueueSeekbarThumbnailCacheTaskForImportedVideo(importedVideo.id).catch(
+          (error) => {
+            console.error("提交预览图提取任务失败:", error);
+          },
+        );
+      }
+
+      const waveformTask = generateWaveformForImportedVideo(importedVideo.id);
+      const danmuTask = enableDanmuDownload
+        ? downloadDanmuForImportedVideo(importedVideo.id)
+        : Promise.resolve();
+
+      const [waveformResult, danmuResult] = await Promise.allSettled([
+        waveformTask,
+        danmuTask,
+      ]);
+
+      if (waveformResult.status === "rejected") {
+        console.error("音频波形生成失败:", waveformResult.reason);
+        alert("导入成功，但音频波形生成失败: " + waveformResult.reason);
+      }
+      if (danmuResult.status === "rejected") {
+        console.error("弹幕下载失败:", danmuResult.reason);
+        alert("导入成功，但下载弹幕失败: " + danmuResult.reason);
+      }
+      showDialog = false;
+      selectedFilePath = null;
+      selectedFileName = "";
+      selectedFileSize = 0;
+      videoTitle = "";
+      enableDanmuDownload = false;
+      danmuBvid = "";
+      danmuPage = 1;
+      resetBatchImportState();
+      dispatch("imported");
     } catch (error) {
       console.error("导入失败:", error);
       alert("导入失败: " + error);
+    } finally {
       importing = false;
       currentImportEventId = null;
       importProgress = "";
+      clear_update_listener?.();
+      clear_finished_listener?.();
     }
   }
 
@@ -489,6 +599,9 @@
     selectedFileName = "";
     selectedFileSize = 0;
     videoTitle = "";
+    enableDanmuDownload = false;
+    danmuBvid = "";
+    danmuPage = 1;
     uploading = false;
     uploadProgress = 0;
     importing = false;
@@ -533,7 +646,7 @@
         <div class="p-6 space-y-4">
           <div class="flex justify-between items-center">
             <h3 class="text-lg font-medium text-gray-900 dark:text-white">
-              导入外部视频
+              导入录播
             </h3>
             <button
               on:click={closeDialog}
@@ -630,6 +743,9 @@
                     selectedFileName = "";
                     selectedFileSize = 0;
                     videoTitle = "";
+                    enableDanmuDownload = false;
+                    danmuBvid = "";
+                    danmuPage = 1;
                   }}
                   class="text-sm text-red-500 hover:text-red-700"
                 >
@@ -682,6 +798,34 @@
                   class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
                   placeholder="输入视频标题"
                 />
+              </div>
+              <div class="space-y-3 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    bind:checked={enableDanmuDownload}
+                    disabled={importing}
+                  />
+                  <span>导入后下载弹幕</span>
+                </label>
+                {#if enableDanmuDownload}
+                  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <input
+                      type="text"
+                      bind:value={danmuBvid}
+                      placeholder="BV号"
+                      class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+                    />
+                    <input
+                      type="number"
+                      bind:value={danmuPage}
+                      min="1"
+                      step="1"
+                      placeholder="分P（从1开始）"
+                      class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400"
+                    />
+                  </div>
+                {/if}
               </div>
             </div>
           {/if}

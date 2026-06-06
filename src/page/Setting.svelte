@@ -28,6 +28,19 @@
     subtitle_generator_type: "whisper",
     openai_api_endpoint: "",
     openai_api_key: "",
+    online_asr_model: "whisper-1",
+    asr_hotwords: {
+      prefix: "bsrasr",
+      vocabulary_id: "",
+      vocabulary_signature: "",
+      target_model: "",
+      words: [],
+    },
+    oss_access_key_id: "",
+    oss_access_key_secret: "",
+    oss_bucket: "",
+    oss_endpoint: "https://oss-cn-beijing.aliyuncs.com",
+    oss_object_prefix: "bili-shadowreplay/asr",
     powerlive_key: "",
     whisper_model: "",
     whisper_prompt: "",
@@ -43,10 +56,18 @@
       font_size: 36,
       opacity: 0.8,
     },
+    use_native_clip_player: true,
+    native_clip_player_windowed_offset: 28,
+    use_seekbar_thumbnail_cache: true,
   };
 
   let showModal = false;
   let show_clip_name_help = false;
+  let showAsrHotwordModal = false;
+  let asrHotwordDraftPrefix = "bsrasr";
+  let asrHotwordDraftText = "";
+  let asrHotwordSyncStatus = "";
+  let asrHotwordSyncing = false;
   let endpoint = localStorage.getItem("endpoint") || "";
   let endpointValue = endpoint;
 
@@ -75,6 +96,132 @@
       clipNotify: setting_model.clip_notify,
       postNotify: setting_model.post_notify,
     });
+  }
+
+  async function updateOnlineAsrModel() {
+    await invoke("update_online_asr_model", {
+      onlineAsrModel: setting_model.online_asr_model,
+    });
+    const endpointDefaults: Record<string, string> = {
+      "whisper-1": "https://api.openai.com/v1",
+      "fun-asr-realtime": "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+      "qwen3-asr-flash-realtime":
+        "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+      "fun-asr-filetrans":
+        "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription",
+      "qwen3-asr-flash-filetrans":
+        "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription",
+    };
+    const defaultEndpoint = endpointDefaults[setting_model.online_asr_model];
+    const managedEndpoints = [
+      "https://api.openai.com/v1",
+      "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "wss://dashscope.aliyuncs.com/api-ws/v1/inference",
+      "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+      "https://dashscope.aliyuncs.com/api/v1/services/audio/asr/transcription",
+    ];
+    if (
+      defaultEndpoint &&
+      (!setting_model.openai_api_endpoint ||
+        managedEndpoints.includes(setting_model.openai_api_endpoint))
+    ) {
+      setting_model.openai_api_endpoint = defaultEndpoint;
+      await invoke("update_openai_api_endpoint", {
+        openaiApiEndpoint: setting_model.openai_api_endpoint,
+      });
+    }
+  }
+
+  $: asrHotwordCount =
+    setting_model.asr_hotwords?.words?.filter((word) => word.text.trim()).length ?? 0;
+
+  function openAsrHotwordModal() {
+    const config = setting_model.asr_hotwords ?? {
+      prefix: "bsrasr",
+      vocabulary_id: "",
+      vocabulary_signature: "",
+      target_model: "",
+      words: [],
+    };
+    asrHotwordDraftPrefix = config.prefix || "bsrasr";
+    asrHotwordDraftText = config.words
+      .map((word) =>
+        [word.text, word.weight || 4, word.lang || ""]
+          .filter((part, index) => index < 2 || String(part).trim())
+          .join(",")
+      )
+      .join("\n");
+    asrHotwordSyncStatus = config.vocabulary_id
+      ? `已同步 ${config.vocabulary_id}`
+      : "";
+    showAsrHotwordModal = true;
+  }
+
+  function normalizeAsrHotwordPrefix(prefix: string) {
+    const normalized = prefix
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .slice(0, 10);
+    return normalized || "bsrasr";
+  }
+
+  function parseAsrHotwordDraft() {
+    return asrHotwordDraftText
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [textPart, weightPart, langPart] = line.split(/[,，\t]/);
+        const weight = Math.max(
+          1,
+          Math.min(5, Math.round(Number(weightPart) || 4))
+        );
+        return {
+          text: (textPart || "").trim(),
+          weight,
+          lang: (langPart || "").trim(),
+        };
+      })
+      .filter((word) => word.text);
+  }
+
+  async function saveAsrHotwords(sync = false) {
+    const previous = setting_model.asr_hotwords ?? {
+      prefix: "bsrasr",
+      vocabulary_id: "",
+      vocabulary_signature: "",
+      target_model: "",
+      words: [],
+    };
+    setting_model.asr_hotwords = {
+      ...previous,
+      prefix: normalizeAsrHotwordPrefix(asrHotwordDraftPrefix),
+      words: parseAsrHotwordDraft(),
+    };
+    await invoke("update_asr_hotwords", {
+      asrHotwords: setting_model.asr_hotwords,
+    });
+    asrHotwordSyncStatus = "已保存";
+    if (sync) {
+      await syncAsrHotwords();
+    }
+  }
+
+  async function syncAsrHotwords() {
+    asrHotwordSyncing = true;
+    asrHotwordSyncStatus = "同步中";
+    try {
+      const synced = await invoke("sync_asr_hotwords");
+      setting_model.asr_hotwords = synced as Config["asr_hotwords"];
+      asrHotwordDraftPrefix = setting_model.asr_hotwords.prefix || "bsrasr";
+      asrHotwordSyncStatus = setting_model.asr_hotwords.vocabulary_id
+        ? `已同步 ${setting_model.asr_hotwords.vocabulary_id}`
+        : "未启用热词";
+    } catch (error) {
+      asrHotwordSyncStatus = `${error}`;
+    } finally {
+      asrHotwordSyncing = false;
+    }
   }
 
   async function handleCacheChange() {
@@ -162,6 +309,29 @@
     });
   }
 
+  async function update_use_native_clip_player() {
+    await invoke("update_use_native_clip_player", {
+      useNativeClipPlayer: setting_model.use_native_clip_player,
+    });
+  }
+
+  async function update_native_clip_player_windowed_offset() {
+    setting_model.native_clip_player_windowed_offset = Math.max(
+      -200,
+      Math.min(200, Math.round(setting_model.native_clip_player_windowed_offset || 0))
+    );
+    await invoke("update_native_clip_player_windowed_offset", {
+      nativeClipPlayerWindowedOffset:
+        setting_model.native_clip_player_windowed_offset,
+    });
+  }
+
+  async function update_use_seekbar_thumbnail_cache() {
+    await invoke("update_use_seekbar_thumbnail_cache", {
+      useSeekbarThumbnailCache: setting_model.use_seekbar_thumbnail_cache,
+    });
+  }
+
   onMount(async () => {
     await get_config();
   });
@@ -234,6 +404,78 @@
                     placeholder="https://example.com/webhook"
                   />
                 </div>
+              </div>
+            </div>
+            <div class="p-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="text-sm font-medium text-gray-900 dark:text-white">
+                    剪辑预览使用 Apple Video Player
+                  </h3>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    启用后，macOS 剪辑窗口会优先使用 AVPlayer 进行预览，关闭后回退到
+                    WebKit 的 <code>&lt;video&gt;</code> 播放
+                  </p>
+                </div>
+                <label class="relative inline-block w-11 h-6">
+                  <input
+                    type="checkbox"
+                    class="peer opacity-0 w-0 h-0"
+                    bind:checked={setting_model.use_native_clip_player}
+                    on:change={update_use_native_clip_player}
+                  />
+                  <span
+                    class="switch-slider absolute cursor-pointer top-0 left-0 right-0 bottom-0 bg-gray-300 dark:bg-gray-600 rounded-full transition-all duration-300 before:absolute before:h-4 before:w-4 before:left-1 before:bottom-1 before:bg-white before:rounded-full before:transition-all before:duration-300 peer-checked:bg-blue-500 peer-checked:before:translate-x-5"
+                  ></span>
+                </label>
+              </div>
+            </div>
+            <div class="p-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="text-sm font-medium text-gray-900 dark:text-white">
+                    Native Player 窗口模式垂直偏移
+                  </h3>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    仅在非全屏的 macOS 剪辑预览中生效，用于修正 AVPlayer 与 Web
+                    预览框的上下偏差，单位为像素
+                  </p>
+                </div>
+                <div class="flex items-center space-x-2">
+                  <input
+                    type="number"
+                    min="-200"
+                    max="200"
+                    step="1"
+                    class="px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white w-24"
+                    bind:value={setting_model.native_clip_player_windowed_offset}
+                    on:blur={update_native_clip_player_windowed_offset}
+                  />
+                  <span class="text-sm text-gray-500 dark:text-gray-400">px</span>
+                </div>
+              </div>
+            </div>
+            <div class="p-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="text-sm font-medium text-gray-900 dark:text-white">
+                    自动生成进度条预览图
+                  </h3>
+                  <p class="text-sm text-gray-500 dark:text-gray-400">
+                    开启后会在后台生成并缓存进度条预览图；关闭后不会再生成预览图，剪辑界面悬停仅显示占位图
+                  </p>
+                </div>
+                <label class="relative inline-block w-11 h-6">
+                  <input
+                    type="checkbox"
+                    class="peer opacity-0 w-0 h-0"
+                    bind:checked={setting_model.use_seekbar_thumbnail_cache}
+                    on:change={update_use_seekbar_thumbnail_cache}
+                  />
+                  <span
+                    class="switch-slider absolute cursor-pointer top-0 left-0 right-0 bottom-0 bg-gray-300 dark:bg-gray-600 rounded-full transition-all duration-300 before:absolute before:h-4 before:w-4 before:left-1 before:bottom-1 before:bg-white before:rounded-full before:transition-all before:duration-300 peer-checked:bg-blue-500 peer-checked:before:translate-x-5"
+                  ></span>
+                </label>
               </div>
             </div>
           </div>
@@ -541,7 +783,7 @@
                       }}
                     >
                       <option value="whisper">本地 Whisper</option>
-                      <option value="whisper_online">在线 Whisper API</option>
+                      <option value="whisper_online">在线 ASR API</option>
                       <option value="powerlive">PowerLive</option>
                     </select>
                   </div>
@@ -615,10 +857,65 @@
                         <h3
                           class="text-sm font-medium text-gray-900 dark:text-white"
                         >
-                          OpenAI API 端点
+                          在线 ASR 模型
                         </h3>
                         <p class="text-sm text-gray-500 dark:text-gray-400">
-                          设置 OpenAI API 的端点地址，默认为官方地址
+                          选择在线字幕生成使用的识别模型
+                        </p>
+                      </div>
+                      <div class="flex items-center space-x-2">
+                        <select
+                          class="px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white w-96"
+                          bind:value={setting_model.online_asr_model}
+                          on:change={updateOnlineAsrModel}
+                        >
+                          <option value="whisper-1">OpenAI Whisper-1</option>
+                          <option value="fun-asr-realtime">Fun-ASR Realtime</option>
+                          <option value="qwen3-asr-flash-realtime"
+                            >Qwen3 ASR Realtime</option
+                          >
+                          <option value="fun-asr-filetrans">Fun-ASR Filetrans</option>
+                          <option value="qwen3-asr-flash-filetrans"
+                            >Qwen3 ASR Filetrans</option
+                          >
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="p-4">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <h3
+                          class="text-sm font-medium text-gray-900 dark:text-white"
+                        >
+                          ASR 热词
+                        </h3>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                          {asrHotwordCount > 0
+                            ? `${asrHotwordCount} 个热词`
+                            : "未设置"}
+                        </p>
+                      </div>
+                      <div class="flex items-center space-x-2">
+                        <button
+                          class="px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                          on:click={openAsrHotwordModal}
+                        >
+                          设置
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="p-4">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <h3
+                          class="text-sm font-medium text-gray-900 dark:text-white"
+                        >
+                          在线 ASR API 端点
+                        </h3>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                          OpenAI 使用官方地址；DashScope 模型使用对应 HTTP 或 WebSocket 地址
                         </p>
                       </div>
                       <div class="flex items-center space-x-2">
@@ -646,7 +943,7 @@
                           OpenAI API 密钥
                         </h3>
                         <p class="text-sm text-gray-500 dark:text-gray-400">
-                          设置 OpenAI API 的访问密钥
+                          设置 OpenAI 或 DashScope ASR API 的访问密钥
                         </p>
                       </div>
                       <div class="flex items-center space-x-2">
@@ -661,6 +958,23 @@
                           }}
                           placeholder="sk-..."
                         />
+                      </div>
+                    </div>
+                  </div>
+                  <div class="p-4">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <h3
+                          class="text-sm font-medium text-gray-900 dark:text-white"
+                        >
+                          文件转写音频上传
+                        </h3>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">
+                          阿里云文件转写使用 DashScope 临时 OSS，无需配置 AccessKey 或 Bucket
+                        </p>
+                      </div>
+                      <div class="text-sm text-gray-500 dark:text-gray-400">
+                        URL 有效期 48 小时
                       </div>
                     </div>
                   </div>
@@ -988,6 +1302,82 @@
           on:click={confirmChange}
         >
           确认
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showAsrHotwordModal}
+  <div
+    class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+  >
+    <div class="bg-white dark:bg-[#2c2c2e] rounded-xl p-6 max-w-2xl w-full mx-4">
+      <div class="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h3 class="text-lg font-medium text-gray-900 dark:text-white">
+            ASR 热词
+          </h3>
+          <p class="text-sm text-gray-600 dark:text-gray-400 mt-2">
+            每行一个热词，可写成“热词,权重,语言”，权重 1-5，语言可留空。
+          </p>
+        </div>
+        <button
+          class="px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          on:click={() => (showAsrHotwordModal = false)}
+        >
+          关闭
+        </button>
+      </div>
+      <div class="space-y-4">
+        <div>
+          <label
+            for="asr-hotword-prefix"
+            class="block text-sm text-gray-700 dark:text-gray-300 mb-2"
+          >
+            前缀
+          </label>
+          <input
+            id="asr-hotword-prefix"
+            type="text"
+            class="px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white w-48"
+            bind:value={asrHotwordDraftPrefix}
+            maxlength="10"
+          />
+        </div>
+        <div>
+          <label
+            for="asr-hotword-text"
+            class="block text-sm text-gray-700 dark:text-gray-300 mb-2"
+          >
+            热词
+          </label>
+          <textarea
+            id="asr-hotword-text"
+            class="w-full h-64 px-3 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 text-gray-900 dark:text-white font-mono text-sm resize-none"
+            bind:value={asrHotwordDraftText}
+            placeholder={"罗德岛,4,zh\n德狗,4,zh\nRhodes Island,3,en"}
+          ></textarea>
+        </div>
+        {#if asrHotwordSyncStatus}
+          <p class="text-sm text-gray-500 dark:text-gray-400 break-all">
+            {asrHotwordSyncStatus}
+          </p>
+        {/if}
+      </div>
+      <div class="flex justify-end space-x-3 mt-6">
+        <button
+          class="px-4 py-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          on:click={() => saveAsrHotwords(false)}
+        >
+          保存
+        </button>
+        <button
+          class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
+          disabled={asrHotwordSyncing}
+          on:click={() => saveAsrHotwords(true)}
+        >
+          {asrHotwordSyncing ? "同步中" : "保存并同步"}
         </button>
       </div>
     </div>
