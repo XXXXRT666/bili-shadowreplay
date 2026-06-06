@@ -8,6 +8,15 @@ body {
   width: 100%;
   user-select: none;
   cursor: default;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+#app {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 /* Hide Safari AirPlay button on video elements */
@@ -65,6 +74,10 @@ video::-webkit-media-controls-start-playback-button {
   height: 6px;
 }
 
+.sidebar-scrollbar {
+  overscroll-behavior: contain;
+}
+
 .sidebar-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
@@ -118,6 +131,10 @@ video::-webkit-media-controls-start-playback-button {
 .custom-scrollbar-light::-webkit-scrollbar {
   width: 6px;
   height: 6px;
+}
+
+.custom-scrollbar-light {
+  overscroll-behavior: contain;
 }
 
 .custom-scrollbar-light::-webkit-scrollbar-track {

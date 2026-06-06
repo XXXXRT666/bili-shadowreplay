@@ -1,0 +1,769 @@
+  .z-15 {
+    z-index: 15;
+  }
+
+  .lottie-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .lottie-icon--18 {
+    width: 18px;
+    height: 18px;
+  }
+
+  .lottie-icon--17 {
+    width: 17px;
+    height: 17px;
+  }
+
+  .bpx-player-control-top {
+    box-sizing: border-box;
+    left: 0;
+    opacity: 1;
+    position: absolute;
+    right: 0;
+    transition: opacity 0.2s ease-out;
+    visibility: visible;
+  }
+
+  .bpx-player-control-top--timeline {
+    top: 8px;
+    padding: 0 12px;
+    z-index: 120;
+  }
+
+  .bpx-player-progress-area {
+    --seekbar-hover-track-height: 6px;
+    --seekbar-indicator-size: 18px;
+    --seekbar-hover-hit-top-extend: 6px;
+    --seekbar-hover-hit-bottom-extend: 8px;
+    position: relative;
+    width: 100%;
+    height: 6px;
+    cursor: pointer;
+    overflow: visible;
+  }
+
+  .bpx-player-progress-area .bpx-player-progress-freezone {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(var(--seekbar-hover-hit-top-extend) * -1);
+    bottom: calc(var(--seekbar-hover-hit-bottom-extend) * -1);
+    pointer-events: auto;
+    z-index: 0;
+  }
+
+  .bpx-player-progress-area .bpx-player-progress-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+    overflow: visible;
+  }
+
+  .bpx-player-progress-area .bpx-player-progress-wrap .bpx-player-progress {
+    align-items: center;
+    display: flex;
+    height: 4px;
+    position: relative;
+    transition:
+      height 0.16s cubic-bezier(0.4, 0, 0.2, 1),
+      transform 0.1s cubic-bezier(0, 0, 0.2, 1);
+    width: 100%;
+    overflow: visible;
+  }
+
+  .bpx-player-progress-area
+    .bpx-player-progress-wrap
+    .bpx-player-progress.is-active {
+    height: var(--seekbar-hover-track-height);
+  }
+
+  .bpx-player-progress-schedule-wrap {
+    position: absolute;
+    inset: 0;
+  }
+
+  .bpx-player-progress-schedule {
+    background-color: hsla(0, 0%, 100%, 0.22);
+    border-radius: 1.5px;
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+  }
+
+  .bpx-player-progress-schedule-buffer {
+    position: absolute;
+    inset: 0;
+    transform-origin: left center;
+    background-color: hsla(0, 0%, 100%, 0.3);
+  }
+
+  .bpx-player-progress-schedule-buffer--hidden {
+    opacity: 0;
+    visibility: hidden;
+  }
+
+  .bpx-player-progress-schedule-current {
+    position: absolute;
+    inset: 0;
+    transform-origin: left center;
+    background-color: var(--bpx-primary-color, #00a1d6);
+  }
+
+  .bpx-player-pbp--control-overlay {
+    box-sizing: border-box;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    width: auto;
+    height: 28px;
+    padding: 0 12px;
+    margin-bottom: 0;
+    opacity: 0.58;
+    pointer-events: auto;
+    cursor: pointer;
+    user-select: none;
+    z-index: 25;
+  }
+
+  .bpx-player-pbp--control-overlay svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .bpx-player-pbp--control-overlay .bpx-player-pbp-played-path {
+    transition: none;
+  }
+
+  .bpx-player-progress-area
+    .bpx-player-progress-wrap
+    .bpx-player-progress-point-wrap {
+    height: 100%;
+    left: 0;
+    pointer-events: none;
+    position: absolute;
+    top: 0;
+    width: 100%;
+  }
+
+  .bpx-player-progress-thumb {
+    position: absolute;
+    top: 50%;
+    width: 22px;
+    height: 22px;
+    margin-top: -11px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+
+  .bpx-player-progress-thumb.is-active,
+  .bpx-player-progress.is-active .bpx-player-progress-thumb {
+    opacity: 1;
+  }
+
+  .bpx-player-progress-area
+    .bpx-player-progress-wrap
+    .bpx-player-progress-thumb-icon {
+    width: 100%;
+    height: 100%;
+    line-height: 12px;
+    -webkit-transform: scale(0);
+    transform: scale(0);
+    -webkit-transition: all 0.2s;
+    transition: all 0.2s;
+    transform-origin: center;
+  }
+
+  .bpx-player-progress-thumb.is-active .bpx-player-progress-thumb-icon,
+  .bpx-player-progress.is-active
+    .bpx-player-progress-thumb
+    .bpx-player-progress-thumb-icon,
+  .bpx-player-progress.is-dragging
+    .bpx-player-progress-thumb
+    .bpx-player-progress-thumb-icon {
+    -webkit-transform: scale(1);
+    transform: scale(1);
+  }
+
+  .bpx-player-progress-thumb-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    transform: translate3d(0, 0, 0);
+  }
+
+  .bpx-player-progress-area
+    .bpx-player-progress-wrap
+    .bpx-player-progress-move-indicator {
+    top: 50%;
+    transform: translate(-50%, -50%);
+    height: var(--seekbar-indicator-size);
+    pointer-events: none;
+    position: absolute;
+    width: var(--seekbar-indicator-size);
+    z-index: 42;
+  }
+
+  .bpx-player-progress-move-indicator-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .bpx-player-progress-move-indicator .ql-stroke {
+    fill: #17b8ff;
+    filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.35));
+  }
+
+  .bpx-player-progress-popup-layer {
+    position: fixed;
+    pointer-events: none;
+    width: 160px;
+    z-index: 240;
+  }
+
+  .bpx-player-progress-preview {
+    height: 90px;
+    position: relative;
+    width: 160px;
+    border-radius: 2px;
+    overflow: hidden;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    background: #0f0f0f;
+  }
+
+  .bpx-player-progress-preview--transparent {
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .bpx-player-progress-preview-image {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+  }
+
+  .bpx-player-progress-preview-image--transparent {
+    opacity: 0;
+  }
+
+  .bpx-player-progress-preview-time {
+    background-color: hsla(0, 0%, 8%, 0.9);
+    border-radius: 2px;
+    bottom: 0;
+    color: #fff;
+    display: inline-block;
+    font-size: 12px;
+    height: 18px;
+    left: 50%;
+    line-height: 18px;
+    padding: 0 5px;
+    position: absolute;
+    transform: translateX(-50%);
+    vertical-align: bottom;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bpx-player-progress-hotspot {
+    height: 10px;
+    width: 100%;
+  }
+
+  .bpx-player-progress-cursor {
+    pointer-events: none;
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+  }
+
+  .bpx-player-progress-scaleplate {
+    display: none;
+  }
+
+  .bpx-player-control-bottom {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .bpx-player-control-bottom-left,
+  .bpx-player-control-bottom-right {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .bpx-player-control-bottom-center {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  ::selection {
+    background: #1890ff;
+    color: #fff;
+  }
+
+  .bpx-player-ctrl-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    fill: #fff;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0;
+    height: 28px;
+    line-height: 28px;
+    outline: 0;
+    position: relative;
+    text-align: center;
+    width: auto;
+    z-index: 2;
+    padding: 0 6px;
+    border: 0;
+    cursor: pointer;
+    background: transparent;
+    transition:
+      color 0.18s ease,
+      opacity 0.18s ease,
+      transform 0.18s ease;
+  }
+
+  .bpx-player-ctrl-btn:hover,
+  .bpx-player-ctrl-btn:focus-visible {
+    color: #ffffff;
+    outline: none;
+  }
+
+  .bpx-player-ctrl-play,
+  .bpx-player-ctrl-setting,
+  .bpx-player-ctrl-volume,
+  .bpx-player-ctrl-web,
+  .bpx-player-ctrl-wide,
+  .bpx-player-ctrl-full {
+    width: 28px;
+    padding: 0;
+  }
+
+  .bpx-player-ctrl-btn-icon {
+    display: inline-flex;
+    width: 18px;
+    height: 18px;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transform: translateY(0);
+    transition: transform 0.18s ease;
+  }
+
+  .bpx-player-ctrl-time {
+    padding: 0;
+    color: rgba(255, 255, 255, 0.9);
+    position: relative;
+    min-width: 96px;
+    height: 20px;
+  }
+
+  .bpx-player-ctrl-time-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    font-size: 12px;
+    line-height: 20px;
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    text-align: center;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bpx-player-ctrl-time-seek {
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid transparent;
+    color: inherit;
+    font-size: 12px;
+    height: 20px;
+    left: 6px;
+    line-height: 20px;
+    padding: 0 5px;
+    position: absolute;
+    text-align: center;
+    top: 0;
+    width: 60px;
+    outline: none;
+  }
+
+  .bpx-player-ctrl-time-seek:focus {
+    border-color: rgba(255, 255, 255, 0.5);
+  }
+
+  .bpx-player-ctrl-time-label.is-hidden,
+  .bpx-player-ctrl-time-seek.is-hidden {
+    display: none;
+  }
+
+  .bpx-player-ctrl-time-divide,
+  .bpx-player-ctrl-time-duration {
+    color: rgba(255, 255, 255, 0.56);
+  }
+
+  .bpx-player-ctrl-time-divide {
+    padding: 0 2px;
+  }
+
+  .clip-timeline-zoom-control {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 8px;
+    margin-left: 8px;
+  }
+
+  .clip-timeline-zoom-progress {
+    width: 198px;
+    min-width: 198px;
+    gap: 6px;
+  }
+
+  .clip-timeline-zoom-progress .bpx-player-dm-setting-progress-title {
+    width: 28px;
+    color: rgba(255, 255, 255, 0.56);
+  }
+
+  .clip-timeline-zoom-progress .bpx-player-dm-setting-progress-content {
+    height: 12px;
+  }
+
+  .clip-timeline-zoom-progress .bui-progress-wrap {
+    --bui-thumb-size: 14px;
+    --bui-thumb-radius: 7px;
+    --bui-step-edge-inset: 4px;
+    height: 6px;
+  }
+
+  .clip-timeline-zoom-progress .bui-progress-lab {
+    opacity: 0.9;
+  }
+
+  .clip-timeline-zoom-progress .bui-progress-val {
+    display: none;
+  }
+
+  .clip-timeline-scroll-host {
+    scrollbar-gutter: auto;
+  }
+
+  .bpx-player-ctrl-playbackrate {
+    font-size: 14px;
+    width: 50px;
+  }
+
+  .bpx-player-ctrl-playbackrate-result {
+    cursor: pointer;
+    font-weight: 600;
+    white-space: nowrap;
+    width: 100%;
+  }
+
+  .bpx-player-ctrl-playbackrate-menu {
+    background-color: rgba(20, 20, 20, 0.9);
+    border-radius: 2px;
+    bottom: calc(100% + 14px);
+    box-sizing: border-box;
+    left: 50%;
+    margin: 0;
+    padding: 0;
+    position: absolute;
+    text-align: center;
+    transform: translateX(-50%);
+    width: 70px;
+  }
+
+  .bpx-player-ctrl-playbackrate-menu-item {
+    cursor: pointer;
+    height: 36px;
+    line-height: 36px;
+    position: relative;
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text1, rgba(255, 255, 255, 0.68));
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .bpx-player-ctrl-playbackrate-menu-item:hover,
+  .bpx-player-ctrl-playbackrate-menu-item:focus-visible {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+    outline: none;
+  }
+
+  .bpx-player-ctrl-playbackrate-menu-item.bpx-state-active {
+    color: var(--bpx-primary-color, #00a1d6);
+  }
+
+  .bpx-player-ctrl-volume-box {
+    background: rgba(20, 20, 20, 0.9);
+    border-radius: 2px;
+    bottom: calc(100% + 14px);
+    height: 130px;
+    left: 50%;
+    position: absolute;
+    width: 38px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px 0 12px;
+    user-select: none;
+    transform: translateX(-50%);
+  }
+
+  .bpx-player-ctrl-setting-menu {
+    box-sizing: border-box;
+    padding: 2px 0;
+    width: 100%;
+  }
+
+  .bui-switch .bui-switch-input {
+    cursor: pointer;
+    height: 100%;
+    left: 0;
+    margin: 0;
+    opacity: 0;
+    position: absolute;
+    top: 0;
+    width: 100%;
+    z-index: 1;
+  }
+
+  .bui-switch {
+    position: relative;
+    display: block;
+  }
+
+  .bui-switch .bui-area {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+
+  .bui-switch-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    cursor: pointer;
+    color: #ffffff;
+    user-select: none;
+  }
+
+  .bui-switch-name {
+    font-size: 12px;
+    color: #ffffff;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bui-switch-body {
+    position: relative;
+    width: 28px;
+    height: 16px;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.18);
+    flex: 0 0 auto;
+    transition: background-color 0.15s ease-in-out;
+  }
+
+  .bui-switch-dot {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #ffffff;
+    transition: transform 0.15s ease-in-out;
+  }
+
+  .bui-switch-dot > span {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+  }
+
+  .bui-switch-input:checked + .bui-switch-label .bui-switch-body {
+    background: #00a1d6;
+  }
+
+  .bui-switch-input:checked + .bui-switch-label .bui-switch-dot {
+    transform: translateX(12px);
+  }
+
+  .bui-switch-input:disabled + .bui-switch-label {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .bui-switch-input:focus-visible + .bui-switch-label {
+    outline: 1px solid rgba(255, 255, 255, 0.6);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  .bpx-player-ctrl-volume-number {
+    margin-bottom: 10px;
+    font-size: 12px;
+    line-height: 1;
+    color: #ffffff;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bpx-player-ctrl-volume-progress {
+    display: flex;
+    width: 20px;
+    height: 130px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  input[type="range"].clip-volume-slider {
+    --volume-percent: 100%;
+    width: 100px;
+    height: 18px;
+    margin: 0;
+    transform: rotate(-90deg);
+    transform-origin: center;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    color: #ffffff;
+    accent-color: #ffffff;
+    cursor: pointer;
+    outline: none;
+  }
+
+  input[type="range"].clip-volume-slider::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: linear-gradient(
+      to right,
+      var(--bpx-primary-color, #00a1d6) 0%,
+      var(--bpx-primary-color, #00a1d6) var(--volume-percent),
+      rgba(255, 255, 255, 0.2) var(--volume-percent),
+      rgba(255, 255, 255, 0.2) 100%
+    );
+  }
+
+  input[type="range"].clip-volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    width: 10px;
+    height: 10px;
+    margin-top: -3px;
+    border: 0;
+    border-radius: 9999px;
+    background: #ffffff !important;
+    cursor: pointer;
+  }
+
+  input[type="range"].clip-volume-slider::-moz-range-track {
+    height: 4px;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  input[type="range"].clip-volume-slider::-moz-range-progress {
+    height: 4px;
+    border-radius: 9999px;
+    background: var(--bpx-primary-color, #00a1d6);
+  }
+
+  input[type="range"].clip-volume-slider::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    border: 0;
+    border-radius: 9999px;
+    background: #ffffff;
+    cursor: pointer;
+  }
+
+  .preview-display-menu,
+  .bpx-player-ctrl-setting-box {
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 14px);
+    width: 156px;
+    padding: 0;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: #212121;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+    transform: translateX(-50%);
+    isolation: isolate;
+    user-select: none;
+  }
+
+  .preview-display-menu--floating {
+    position: fixed !important;
+    bottom: auto !important;
+    transform: none !important;
+  }
+
+  .preview-display-menu-item {
+    display: flex;
+    width: 100%;
+    height: 34px;
+    align-items: center;
+    padding: 0 12px;
+    border: 0;
+    background: transparent;
+    color: #fff;
+    font-size: 12px;
+    line-height: 34px;
+    text-align: left;
+    transition: background-color 0.15s ease-in-out;
+  }
+
+  .preview-display-menu-item:hover {
+    background: rgba(255, 255, 255, 0.12);
+  }
+
+  .preview-display-menu-item .bui-switch-label {
+    height: 34px;
+  }
+
+  .preview-display-menu-item .bui-switch-name {
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .waveform-container {
+    background: #1c1c1e;
+    border-radius: 4px;
+    width: 100%;
+    height: 100%;
+  }
