@@ -67,9 +67,11 @@ Linux 打包 Vulkan 版本时额外使用 `--config src-tauri/tauri.linux.vulkan
 详细要求、限制和构建命令见
 [`gpu-export/README.md`](../../src-tauri/crates/gpu-export/README.md)。
 
-## Windows：处理 Skia 内置 ICU 的符号冲突
+## Windows：隔离 Skia 与 V8 的私有符号
 
 上游 Windows 预编译包的 `skunicode_icu.lib` 与 V8（`deno_core` 依赖）都内置了 ICU 74。Skia 的 ICU 关闭了版本化重命名，而 `ulocimp_getParent` 等少数 ICU 内部符号在 V8 的 ICU 中同样没有版本后缀，两边定义同名符号。MSVC 链接时会报 `LNK2005 ulocimp_getParent already defined`，未报错的同名符号也可能让 Skia 的 ICU 调用到 V8 的实现。
+
+`skia.lib` 还包含 `_HAS_EXCEPTIONS=0` 时 STL 生成的 `std::terminate()`，其实现直接调用 `abort()`；V8 的 libc++ 定义同名函数并调用终止处理器。两者也需要独立命名，保留各自的行为，避免 `LNK2005 std::terminate already defined`。
 
 `scripts/prepare-windows-skia.mjs` 下载同版本、同目标、同 feature 的官方压缩包并校验 SHA-256，用 `llvm-objcopy --redefine-sym` 把这些共有符号在 Skia 库中的定义和引用统一加上 `bsr_skia_` 前缀，再重新打包，最后输出 `SKIA_BINARIES_URL`。构建前在 **Windows 构建终端**中运行：
 
@@ -86,6 +88,7 @@ yarn tauri dev
 - 若压缩包的 key 与当前构建不一致（例如修改了 Skia feature），skia-bindings 会改为源码构建未处理的 Skia，最终仍会链接失败。
 - 升级 `skia-safe`/`skia-bindings` 或 `deno_core`（V8）后，需重新比对两边 ICU 的共有符号，更新脚本中的 key、SHA-256 和符号列表；脚本会在锁定版本不符或符号不存在时报错。
 - Release workflow 会在 Windows 任务中自动执行这一步。
+- 更新准备脚本后，需重新运行并执行 `cargo clean --manifest-path src-tauri/Cargo.toml -p skia-bindings`，避免复用尚未隔离符号的 Skia 产物。
 
 ## Linux：Ubuntu 24.04 起
 
