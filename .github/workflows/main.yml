@@ -196,15 +196,19 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $pkgConfig = Get-Command pkg-config -ErrorAction SilentlyContinue
+          $pkgConfig = Get-Command pkg-config.exe -CommandType Application -ErrorAction SilentlyContinue
           for ($attempt = 0; -not $pkgConfig -and $attempt -lt 3; $attempt++) {
             choco install pkgconfiglite -y --no-progress
-            $pkgConfig = Get-Command pkg-config -ErrorAction SilentlyContinue
+            $pkgConfig = Get-Command pkg-config.exe -CommandType Application -ErrorAction SilentlyContinue
           }
           if (-not $pkgConfig) { throw "pkg-config is unavailable after installation" }
           "PKG_CONFIG=$($pkgConfig.Source)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
           & $pkgConfig.Source --version
           ./ffmpeg_setup.ps1 -Versions "8.1","9.0" -SdkRoot "$env:RUNNER_TEMP/ffmpeg"
+
+      - name: Check Vulkan export bindings (Windows build-only)
+        if: runner.os == 'Windows' && env.BUILD_ONLY == 'true'
+        run: cargo check --manifest-path src-tauri/Cargo.toml -p gpu-export --features vulkan --release --locked
 
       - name: install frontend dependencies
         # If you don't have `beforeBuildCommand` configured you may want to build your frontend here too.
