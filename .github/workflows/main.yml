@@ -18,7 +18,7 @@ jobs:
     env:
       BUILD_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.build_only }}
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event_name == 'workflow_dispatch' && inputs.build_only }}
       matrix:
         include:
           - platform: "macos-15-intel" # CPU rendering; the native Metal worker is arm64-only.
@@ -196,8 +196,14 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install pkgconfiglite -y --no-progress
-          if ($LASTEXITCODE -ne 0) { throw "Failed to install pkg-config" }
+          $pkgConfig = Get-Command pkg-config -ErrorAction SilentlyContinue
+          for ($attempt = 0; -not $pkgConfig -and $attempt -lt 3; $attempt++) {
+            choco install pkgconfiglite -y --no-progress
+            $pkgConfig = Get-Command pkg-config -ErrorAction SilentlyContinue
+          }
+          if (-not $pkgConfig) { throw "pkg-config is unavailable after installation" }
+          "PKG_CONFIG=$($pkgConfig.Source)" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          & $pkgConfig.Source --version
           ./ffmpeg_setup.ps1 -Versions "8.1","9.0" -SdkRoot "$env:RUNNER_TEMP/ffmpeg"
 
       - name: install frontend dependencies
