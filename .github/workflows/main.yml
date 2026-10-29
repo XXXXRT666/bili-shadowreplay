@@ -21,7 +21,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: "macos-15-intel" # native Intel Homebrew headers and libraries.
+          - platform: "macos-15-intel" # CPU rendering; the native Metal worker is arm64-only.
             args: "--target x86_64-apple-darwin"
             target: "x86_64-apple-darwin"
             updater-target: "darwin-x86_64"
@@ -53,8 +53,8 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install FFmpeg 8 and 9 SDKs (macOS only)
-        if: runner.os == 'macOS'
+      - name: Install FFmpeg 8 and 9 SDKs (macOS arm64 only)
+        if: runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'
         run: |
           brew update
           brew install ffmpeg@8 ffmpeg pkg-config
